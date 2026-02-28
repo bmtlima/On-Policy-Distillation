@@ -1,0 +1,95 @@
+"""Modal app definition with images, volumes, and GPU configurations."""
+
+import modal
+
+# ---------------------------------------------------------------------------
+# Modal app
+# ---------------------------------------------------------------------------
+app = modal.App("opd-metis")
+
+# ---------------------------------------------------------------------------
+# Shared volume – caches model weights across runs
+# ---------------------------------------------------------------------------
+model_cache = modal.Volume.from_name("opd-metis-model-cache", create_if_missing=True)
+checkpoint_vol = modal.Volume.from_name("opd-metis-checkpoints", create_if_missing=True)
+
+MODEL_CACHE_DIR = "/root/model-cache"
+CHECKPOINT_DIR = "/root/checkpoints"
+
+# ---------------------------------------------------------------------------
+# Base image – shared deps for all functions
+# ---------------------------------------------------------------------------
+base_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch>=2.1.0",
+        "transformers>=4.45.0",
+        "peft>=0.13.0",
+        "datasets>=3.0.0",
+        "numpy>=1.26.0",
+        "pandas>=2.1.0",
+        "tqdm>=4.66.0",
+        "pyarrow>=14.0.0",
+        "wandb>=0.18.0",
+        "huggingface_hub>=0.25.0",
+        "accelerate>=0.34.0",
+        "sentencepiece>=0.2.0",
+    )
+)
+
+# ---------------------------------------------------------------------------
+# Training image – base + bitsandbytes for NF4 quantization
+# ---------------------------------------------------------------------------
+training_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch>=2.1.0",
+        "transformers>=4.45.0",
+        "peft>=0.13.0",
+        "datasets>=3.0.0",
+        "numpy>=1.26.0",
+        "pandas>=2.1.0",
+        "tqdm>=4.66.0",
+        "pyarrow>=14.0.0",
+        "wandb>=0.18.0",
+        "huggingface_hub>=0.25.0",
+        "accelerate>=0.34.0",
+        "sentencepiece>=0.2.0",
+        "bitsandbytes>=0.43.0",
+    )
+)
+
+# ---------------------------------------------------------------------------
+# vLLM image – for inference (eval + rollouts)
+# ---------------------------------------------------------------------------
+vllm_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "vllm>=0.6.0",
+        "torch>=2.1.0",
+        "transformers>=4.45.0",
+        "numpy>=1.26.0",
+        "pandas>=2.1.0",
+        "tqdm>=4.66.0",
+        "pyarrow>=14.0.0",
+    )
+)
+
+# ---------------------------------------------------------------------------
+# GPU configurations
+# ---------------------------------------------------------------------------
+TEACHER_GPU = "A100-80GB"  # 32B model for baseline eval via vLLM
+STUDENT_GPU = "A10G"  # 1.7B model, plenty of room
+TRAINING_GPU = "A100-80GB"  # Co-located teacher+student for OPD
+
+# ---------------------------------------------------------------------------
+# Model IDs
+# ---------------------------------------------------------------------------
+TEACHER_MODEL_ID = "Qwen/Qwen3-32B"
+TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-32B-AWQ"  # Pre-quantized AWQ for vLLM baselines
+STUDENT_MODEL_ID = "Qwen/Qwen3-1.7B"
+
+# ---------------------------------------------------------------------------
+# Quantization settings
+# ---------------------------------------------------------------------------
+TEACHER_QUANTIZATION = "awq"  # For vLLM baseline inference
