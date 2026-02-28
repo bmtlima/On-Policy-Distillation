@@ -1,0 +1,7 @@
+.claude
+.DS_Store
+.env
+__pycache__/
+*.pyc
+results_*.json
+wandb/
