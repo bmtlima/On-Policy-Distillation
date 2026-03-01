@@ -56,7 +56,7 @@ class TrainConfig:
     checkpoint_every: int = 25
     teacher_batch_size: int = 2  # smaller batches for teacher scoring (memory)
     generation_batch_size: int = 32  # batch size for student model.generate()
-    train_fwd_batch_size: int = 4  # batch size for training forward pass (with grad)
+    train_fwd_batch_size: int = 2  # batch size for training forward pass (with grad)
     wandb_project: str = "opd-metis"
     wandb_run_name: str | None = None
     seed: int = SEED
@@ -442,56 +442,72 @@ def train_opd(
             optimizer.zero_grad()
             continue
 
-        # (e) Batched forward pass current student (WITH gradients)
-        try:
-            current_logprobs_list = compute_current_logprobs_batch(
-                model=student_model,
-                tokenizer=tokenizer,
-                trajectories=valid_trajectories,
-                device=device,
-                batch_size=config.train_fwd_batch_size,
-            )
-        except torch.cuda.OutOfMemoryError:
-            # OOM fallback: process one at a time with gradient accumulation
-            print(f"  OOM in batched fwd pass, falling back to sequential")
-            torch.cuda.empty_cache()
-            current_logprobs_list = compute_current_logprobs_batch(
-                model=student_model,
-                tokenizer=tokenizer,
-                trajectories=valid_trajectories,
-                device=device,
-                batch_size=1,
-            )
+        # (e-g) Forward + loss + backward per sub-batch (gradient accumulation).
+        # This way only one sub-batch's gradient graph is in memory at a time,
+        # instead of holding all 32 graphs simultaneously.
+        pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+        fwd_bs = config.train_fwd_batch_size
 
-        # Compute loss across all valid trajectories, single backward
-        loss_acc = torch.tensor(0.0, device=device)
-        for i, (traj, cur_lps, old_lps, teach_lps, ml) in enumerate(
-            zip(valid_trajectories, current_logprobs_list, old_logprobs_list, teacher_logprobs_list, min_lens)
-        ):
-            cur_lps = cur_lps[:ml]
-            advantages = compute_advantages(old_lps, teach_lps)
+        for chunk_start in range(0, len(valid_trajectories), fwd_bs):
+            chunk_end = min(chunk_start + fwd_bs, len(valid_trajectories))
+            chunk_trajs = valid_trajectories[chunk_start:chunk_end]
+            chunk_old = old_logprobs_list[chunk_start:chunk_end]
+            chunk_teacher = teacher_logprobs_list[chunk_start:chunk_end]
+            chunk_mlens = min_lens[chunk_start:chunk_end]
 
-            loss_dict = compute_is_loss(
-                current_logprobs=cur_lps,
-                old_logprobs=old_lps,
-                advantages=advantages,
-            )
+            # Forward pass with gradients for this sub-batch
+            try:
+                chunk_lps = batch_forward_logprobs(
+                    model=student_model,
+                    trajectories=chunk_trajs,
+                    device=device,
+                    pad_token_id=pad_token_id,
+                    enable_grad=True,
+                )
+            except torch.cuda.OutOfMemoryError:
+                # OOM: fall back to one trajectory at a time
+                print(f"  OOM at chunk {chunk_start}, falling back to sequential")
+                torch.cuda.empty_cache()
+                chunk_lps = []
+                for t in chunk_trajs:
+                    lps = batch_forward_logprobs(
+                        model=student_model,
+                        trajectories=[t],
+                        device=device,
+                        pad_token_id=pad_token_id,
+                        enable_grad=True,
+                    )
+                    chunk_lps.extend(lps)
 
-            loss_acc = loss_acc + loss_dict["loss"] / total_tokens
+            # Compute loss for this sub-batch and backward immediately
+            chunk_loss = torch.tensor(0.0, device=device)
+            for cur_lps, old_lps, teach_lps, ml in zip(
+                chunk_lps, chunk_old, chunk_teacher, chunk_mlens
+            ):
+                cur_lps = cur_lps[:ml]
+                advantages = compute_advantages(old_lps, teach_lps)
 
-            # Track metrics (detached)
-            total_loss += loss_dict["loss"].item()
-            total_kl += (old_lps - teach_lps).mean().item()
-            total_ratio += loss_dict["mean_ratio"].item()
-            total_max_ratio = max(total_max_ratio, loss_dict["max_ratio"].item())
-            total_student_lp += old_lps.mean().item()
-            total_teacher_lp += teach_lps.mean().item()
-            total_adv += advantages.mean().item()
-            total_pct_pos_adv += (advantages > 0).float().mean().item()
-            valid_trajs += 1
+                loss_dict = compute_is_loss(
+                    current_logprobs=cur_lps,
+                    old_logprobs=old_lps,
+                    advantages=advantages,
+                )
 
-        # Single backward pass
-        loss_acc.backward()
+                chunk_loss = chunk_loss + loss_dict["loss"] / total_tokens
+
+                # Track metrics (detached)
+                total_loss += loss_dict["loss"].item()
+                total_kl += (old_lps - teach_lps).mean().item()
+                total_ratio += loss_dict["mean_ratio"].item()
+                total_max_ratio = max(total_max_ratio, loss_dict["max_ratio"].item())
+                total_student_lp += old_lps.mean().item()
+                total_teacher_lp += teach_lps.mean().item()
+                total_adv += advantages.mean().item()
+                total_pct_pos_adv += (advantages > 0).float().mean().item()
+                valid_trajs += 1
+
+            # Backward for this sub-batch — frees the gradient graph
+            chunk_loss.backward()
 
         if valid_trajs > 0:
             # (h) Gradient clipping, optimizer step

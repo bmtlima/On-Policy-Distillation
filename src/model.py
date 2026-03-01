@@ -17,7 +17,7 @@ LORA_CONFIG = LoraConfig(
     r=64,
     lora_alpha=128,  # alpha = 2*r is a common choice
     lora_dropout=0.05,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     bias="none",
 )
 
