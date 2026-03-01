@@ -9,11 +9,12 @@ Implements the OPD algorithm from the Thinking Machines blog:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 import pandas as pd
@@ -23,7 +24,7 @@ import torch.nn.functional as F
 from answer_extraction import extract_boxed_answer
 from src.model import load_student_model, save_lora_checkpoint
 from src.prompts import apply_chat_template, format_problem
-from src.rollout import Trajectory, sample_rollouts_hf
+from src.rollout import Trajectory, batch_forward_logprobs, sample_rollouts_hf
 from src.teacher import compute_teacher_logprobs_local, load_teacher_model
 
 SEED = 42
@@ -42,18 +43,20 @@ def set_seeds(seed: int = SEED) -> None:
 class TrainConfig:
     """Training hyperparameters."""
 
-    lr: float = 1e-5
+    lr: float = 1e-4 # can change to less, like 1e-5
     num_steps: int = 150
     batch_size: int = 8
     num_samples_per_prompt: int = 4
     max_new_tokens: int = 2048
     temperature: float = 0.7
-    top_p: float = 0.95
+    top_p: float = 0.95 # can change to 1.0 too
     ppo_clip_eps: float = 0.2
     max_grad_norm: float = 1.0
     warmup_steps: int = 10
     checkpoint_every: int = 25
     teacher_batch_size: int = 2  # smaller batches for teacher scoring (memory)
+    generation_batch_size: int = 32  # batch size for student model.generate()
+    train_fwd_batch_size: int = 4  # batch size for training forward pass (with grad)
     wandb_project: str = "opd-metis"
     wandb_run_name: str | None = None
     seed: int = SEED
@@ -73,47 +76,35 @@ def compute_advantages(
     return teacher_logprobs - student_logprobs
 
 
-def compute_ppo_loss(
+def compute_is_loss(
     current_logprobs: torch.Tensor,
     old_logprobs: torch.Tensor,
     advantages: torch.Tensor,
-    clip_eps: float = 0.2,
-    mask: torch.Tensor | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Compute clipped PPO surrogate loss.
+    """Compute importance-sampling policy gradient loss.
+
+    Matches the Tinker reference: loss = -(ratio * advantages).sum()
+    No PPO clipping — with num_substeps=1 the ratio is ~1.0 anyway.
 
     Args:
         current_logprobs: log π_θ(x_t) from current policy (with gradients).
         old_logprobs: log π_old(x_t) from policy at sampling time (detached).
         advantages: Per-token advantages (detached).
-        clip_eps: PPO clipping epsilon.
-        mask: Optional boolean mask for valid tokens.
 
     Returns:
-        Dict with loss, mean_ratio, max_ratio, clip_fraction.
+        Dict with loss and ratio diagnostics.
     """
-    # Importance sampling ratio
+    # Importance sampling ratio: p_θ(x) / q(x)
     ratio = torch.exp(current_logprobs - old_logprobs.detach())
-
-    # Clipped surrogate
     adv = advantages.detach()
-    surr1 = ratio * adv
-    surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * adv
 
-    if mask is not None:
-        # Only compute loss over valid (non-padding) tokens
-        per_token_loss = -torch.min(surr1, surr2)
-        loss = (per_token_loss * mask).sum() / mask.sum().clamp(min=1)
-        clip_fraction = (((ratio - 1.0).abs() > clip_eps).float() * mask).sum() / mask.sum().clamp(min=1)
-    else:
-        loss = -torch.min(surr1, surr2).mean()
-        clip_fraction = ((ratio - 1.0).abs() > clip_eps).float().mean()
+    # Importance-weighted loss, averaged over tokens
+    loss = -(ratio * adv).sum()
 
     return {
         "loss": loss,
         "mean_ratio": ratio.mean().detach(),
         "max_ratio": ratio.max().detach(),
-        "clip_fraction": clip_fraction.detach(),
     }
 
 
@@ -135,18 +126,63 @@ def compute_current_logprobs(
     outputs = model(input_ids)
     logits = outputs.logits  # (1, seq_len, vocab_size)
 
-    log_probs = F.log_softmax(logits[0].float(), dim=-1)
+    # Only compute log_softmax at completion positions, not the full sequence
+    n_comp = len(trajectory.completion_token_ids)
+    comp_positions = torch.arange(prompt_len - 1, prompt_len + n_comp - 1, device=device)
+    selected_logits = logits[0, comp_positions, :]
+    selected_lps = F.log_softmax(selected_logits.float(), dim=-1)
 
     # Extract log-probs for completion tokens
     token_logprobs = []
     for i, token_id in enumerate(trajectory.completion_token_ids):
-        pos = prompt_len + i - 1  # logits[t] predicts token[t+1]
-        if pos >= 0:
-            token_logprobs.append(log_probs[pos, token_id])
+        if prompt_len + i - 1 >= 0:
+            token_logprobs.append(selected_lps[i, token_id])
         else:
             token_logprobs.append(torch.tensor(0.0, device=device))
 
     return torch.stack(token_logprobs)
+
+
+def compute_current_logprobs_batch(
+    model,
+    tokenizer,
+    trajectories: list[Trajectory],
+    device: torch.device,
+    batch_size: int = 8,
+) -> list[torch.Tensor]:
+    """Batched forward pass through current student WITH gradients.
+
+    Processes trajectories in sub-batches to control GPU memory while
+    keeping the gradient graph alive for a single backward() call.
+
+    Args:
+        model: Current student model (train mode).
+        tokenizer: Corresponding tokenizer.
+        trajectories: Trajectories to score (must have non-empty completions).
+        device: Torch device.
+        batch_size: Sub-batch size for memory control.
+
+    Returns:
+        List of 1-D tensors with per-completion-token log-probs (gradients attached).
+    """
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
+
+    all_logprobs: list[torch.Tensor] = []
+
+    for chunk_start in range(0, len(trajectories), batch_size):
+        chunk = trajectories[chunk_start : chunk_start + batch_size]
+        lp_tensors = batch_forward_logprobs(
+            model=model,
+            trajectories=chunk,
+            device=device,
+            pad_token_id=pad_token_id,
+            enable_grad=True,
+        )
+        all_logprobs.extend(lp_tensors)
+
+    return all_logprobs
 
 
 def teacher_sanity_check(
@@ -186,7 +222,7 @@ def teacher_sanity_check(
         prompts=prompts,
         ground_truths=subset_gts,
         max_new_tokens=512,  # shorter for sanity check
-        temperature=0.7,
+        temperature=1.0,
         num_samples_per_prompt=1,
     )
 
@@ -289,6 +325,14 @@ def train_opd(
         },
     )
 
+    # JSON-lines log file — persists to checkpoint volume
+    log_path = os.path.join(checkpoint_dir, "train_log.jsonl")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    log_file = open(log_path, "a")
+    # Write config header
+    log_file.write(json.dumps({"event": "config", **asdict(config)}) + "\n")
+    log_file.flush()
+
     # Optimizer — only LoRA params
     trainable_params = [p for p in student_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=config.lr)
@@ -333,6 +377,7 @@ def train_opd(
             temperature=config.temperature,
             top_p=config.top_p,
             num_samples_per_prompt=config.num_samples_per_prompt,
+            generation_batch_size=config.generation_batch_size,
         )
 
         # (c) Score trajectories with teacher (no grad)
@@ -359,15 +404,21 @@ def train_opd(
         total_kl = 0.0
         total_ratio = 0.0
         total_max_ratio = 0.0
-        total_clip_frac = 0.0
+        total_student_lp = 0.0
+        total_teacher_lp = 0.0
+        total_adv = 0.0
+        total_pct_pos_adv = 0.0
         valid_trajs = 0
 
-        for traj in rollout_batch.trajectories:
-            if len(traj.completion_token_ids) == 0:
-                continue
-            if len(traj.teacher_logprobs) == 0:
-                continue
+        # Filter valid trajectories and precompute tensors
+        valid_trajectories = []
+        old_logprobs_list = []
+        teacher_logprobs_list = []
+        min_lens = []
 
+        for traj in rollout_batch.trajectories:
+            if len(traj.completion_token_ids) == 0 or len(traj.teacher_logprobs) == 0:
+                continue
             min_len = min(
                 len(traj.student_logprobs),
                 len(traj.teacher_logprobs),
@@ -375,47 +426,72 @@ def train_opd(
             )
             if min_len == 0:
                 continue
-
-            # Old student log-probs (from sampling time, detached)
-            old_logprobs = torch.tensor(
-                traj.student_logprobs[:min_len], device=device, dtype=torch.float32
+            valid_trajectories.append(traj)
+            min_lens.append(min_len)
+            old_logprobs_list.append(
+                torch.tensor(traj.student_logprobs[:min_len], device=device, dtype=torch.float32)
+            )
+            teacher_logprobs_list.append(
+                torch.tensor(traj.teacher_logprobs[:min_len], device=device, dtype=torch.float32)
             )
 
-            # Teacher log-probs (detached)
-            teacher_logprobs = torch.tensor(
-                traj.teacher_logprobs[:min_len], device=device, dtype=torch.float32
-            )
+        total_tokens = sum(min_lens)
 
-            # (d) Compute advantages
-            advantages = compute_advantages(old_logprobs, teacher_logprobs)
+        if total_tokens == 0:
+            print(f"Step {step:4d}/{config.num_steps} | No valid tokens")
+            optimizer.zero_grad()
+            continue
 
-            # (e) Forward pass current student (WITH gradients)
-            current_logprobs = compute_current_logprobs(
+        # (e) Batched forward pass current student (WITH gradients)
+        try:
+            current_logprobs_list = compute_current_logprobs_batch(
                 model=student_model,
                 tokenizer=tokenizer,
-                trajectory=traj,
+                trajectories=valid_trajectories,
                 device=device,
-            )[:min_len]
-
-            # (f-g) Compute clipped PPO loss
-            loss_dict = compute_ppo_loss(
-                current_logprobs=current_logprobs,
-                old_logprobs=old_logprobs,
-                advantages=advantages,
-                clip_eps=config.ppo_clip_eps,
+                batch_size=config.train_fwd_batch_size,
+            )
+        except torch.cuda.OutOfMemoryError:
+            # OOM fallback: process one at a time with gradient accumulation
+            print(f"  OOM in batched fwd pass, falling back to sequential")
+            torch.cuda.empty_cache()
+            current_logprobs_list = compute_current_logprobs_batch(
+                model=student_model,
+                tokenizer=tokenizer,
+                trajectories=valid_trajectories,
+                device=device,
+                batch_size=1,
             )
 
-            # Accumulate loss (divide by number of trajectories for mean)
-            traj_loss = loss_dict["loss"] / len(rollout_batch.trajectories)
-            traj_loss.backward()
+        # Compute loss across all valid trajectories, single backward
+        loss_acc = torch.tensor(0.0, device=device)
+        for i, (traj, cur_lps, old_lps, teach_lps, ml) in enumerate(
+            zip(valid_trajectories, current_logprobs_list, old_logprobs_list, teacher_logprobs_list, min_lens)
+        ):
+            cur_lps = cur_lps[:ml]
+            advantages = compute_advantages(old_lps, teach_lps)
 
-            # Track metrics
+            loss_dict = compute_is_loss(
+                current_logprobs=cur_lps,
+                old_logprobs=old_lps,
+                advantages=advantages,
+            )
+
+            loss_acc = loss_acc + loss_dict["loss"] / total_tokens
+
+            # Track metrics (detached)
             total_loss += loss_dict["loss"].item()
-            total_kl += (old_logprobs - teacher_logprobs).mean().item()
+            total_kl += (old_lps - teach_lps).mean().item()
             total_ratio += loss_dict["mean_ratio"].item()
             total_max_ratio = max(total_max_ratio, loss_dict["max_ratio"].item())
-            total_clip_frac += loss_dict["clip_fraction"].item()
+            total_student_lp += old_lps.mean().item()
+            total_teacher_lp += teach_lps.mean().item()
+            total_adv += advantages.mean().item()
+            total_pct_pos_adv += (advantages > 0).float().mean().item()
             valid_trajs += 1
+
+        # Single backward pass
+        loss_acc.backward()
 
         if valid_trajs > 0:
             # (h) Gradient clipping, optimizer step
@@ -429,25 +505,37 @@ def train_opd(
             avg_loss = total_loss / valid_trajs
             avg_kl = total_kl / valid_trajs
             avg_ratio = total_ratio / valid_trajs
-            avg_clip_frac = total_clip_frac / valid_trajs
             current_lr = scheduler.get_last_lr()[0]
 
             step_time = time.time() - step_start
+
+            avg_student_lp = total_student_lp / valid_trajs
+            avg_teacher_lp = total_teacher_lp / valid_trajs
+            avg_adv = total_adv / valid_trajs
+            avg_pct_pos_adv = total_pct_pos_adv / valid_trajs
 
             metrics = {
                 "train/loss": avg_loss,
                 "train/reverse_kl": avg_kl,
                 "train/mean_ratio": avg_ratio,
                 "train/max_ratio": total_max_ratio,
-                "train/clip_fraction": avg_clip_frac,
                 "train/grad_norm": grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm,
                 "train/truncation_rate": truncation_rate,
                 "train/lr": current_lr,
                 "train/step_time_s": step_time,
                 "train/valid_trajectories": valid_trajs,
                 "train/total_trajectories": len(rollout_batch.trajectories),
+                "train/mean_student_logprob": avg_student_lp,
+                "train/mean_teacher_logprob": avg_teacher_lp,
+                "train/mean_advantage": avg_adv,
+                "train/pct_positive_advantages": avg_pct_pos_adv,
+                "train/total_tokens": total_tokens,
             }
             wandb.log(metrics, step=step)
+
+            # Persist to JSONL log
+            log_file.write(json.dumps({"event": "step", "step": step, **metrics}) + "\n")
+            log_file.flush()
 
             print(
                 f"Step {step:4d}/{config.num_steps} | "
@@ -475,6 +563,10 @@ def train_opd(
     os.makedirs(final_path, exist_ok=True)
     save_lora_checkpoint(student_model, final_path)
     print(f"Final checkpoint saved to {final_path}")
+
+    log_file.write(json.dumps({"event": "done", "num_steps": config.num_steps}) + "\n")
+    log_file.close()
+    print(f"Training log saved to {log_path}")
 
     wandb.finish()
     return student_model

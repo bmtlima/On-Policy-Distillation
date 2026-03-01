@@ -39,8 +39,15 @@ base_image = (
 
 # ---------------------------------------------------------------------------
 # Training image – base + bitsandbytes for NF4 quantization
+# Includes local source and data for remote execution of run_train.py
 # ---------------------------------------------------------------------------
-training_image = base_image.pip_install("bitsandbytes>=0.43.0")
+training_image = (
+    base_image
+    .pip_install("bitsandbytes>=0.43.0")
+    .add_local_python_source("src")
+    .add_local_file("answer_extraction.py", remote_path="/root/answer_extraction.py")
+    .add_local_dir("data", remote_path="/root/data")
+)
 
 # ---------------------------------------------------------------------------
 # vLLM image – for inference (eval + rollouts)
@@ -68,8 +75,8 @@ TRAINING_GPU = "A100-80GB"  # Co-located teacher+student for OPD
 # ---------------------------------------------------------------------------
 # Model IDs
 # ---------------------------------------------------------------------------
-TEACHER_MODEL_ID = "Qwen/Qwen3-32B"
-TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-32B-AWQ"  # Pre-quantized AWQ for vLLM baselines
+TEACHER_MODEL_ID = "Qwen/Qwen3-14B"
+TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-14B-AWQ"  # Pre-quantized AWQ for vLLM baselines
 STUDENT_MODEL_ID = "Qwen/Qwen3-0.6B"
 
 # ---------------------------------------------------------------------------

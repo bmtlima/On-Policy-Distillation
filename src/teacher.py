@@ -10,7 +10,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 from src.modal_app import TEACHER_MODEL_ID
-from src.rollout import RolloutBatch, Trajectory
+from src.rollout import RolloutBatch, Trajectory, batch_forward_logprobs
 
 
 def load_teacher_model(
@@ -96,34 +96,28 @@ def _score_trajectory_batch(
 ) -> None:
     """Score a batch of trajectories with the teacher model.
 
-    For each trajectory, concatenates prompt + completion tokens and
-    runs a single forward pass. Extracts the teacher's log-prob for
-    each completion token.
+    Uses batch_forward_logprobs to process all trajectories in a single
+    forward pass (right-padded, no gradients).
     """
-    for traj in trajectories:
-        # Build full token sequence
-        full_ids = traj.prompt_token_ids + traj.completion_token_ids
-        input_ids = torch.tensor([full_ids], device=device)
-        prompt_len = len(traj.prompt_token_ids)
+    # Filter out empty completions
+    non_empty = [t for t in trajectories if len(t.completion_token_ids) > 0]
+    if not non_empty:
+        return
 
-        with torch.no_grad():
-            outputs = model(input_ids)
-            logits = outputs.logits  # (1, seq_len, vocab_size)
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = tokenizer.eos_token_id
 
-        # Compute log-probs
-        log_probs = torch.log_softmax(logits[0].float(), dim=-1)
+    lp_tensors = batch_forward_logprobs(
+        model=model,
+        trajectories=non_empty,
+        device=device,
+        pad_token_id=pad_token_id,
+        enable_grad=False,
+    )
 
-        # Extract teacher's log-prob for each completion token
-        teacher_lps = []
-        for i, token_id in enumerate(traj.completion_token_ids):
-            # logits[t] predicts token[t+1]
-            pos = prompt_len + i - 1
-            if pos >= 0:
-                teacher_lps.append(log_probs[pos, token_id].item())
-            else:
-                teacher_lps.append(0.0)
-
-        traj.teacher_logprobs = teacher_lps
+    for traj, lps in zip(non_empty, lp_tensors):
+        traj.teacher_logprobs = lps.tolist()
 
 
 def compute_teacher_logprobs_vllm(
