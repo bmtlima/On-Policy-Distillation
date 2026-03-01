@@ -118,14 +118,12 @@ def main(
     print(f"Loaded {len(problems)} test problems")
     print(f"Checkpoint: {checkpoint_name}")
 
-    # Format prompts
+    # Format prompts using proper chat template
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(STUDENT_MODEL_ID, trust_remote_code=True)
     messages_batch = format_problems_batch(problems)
-    prompts = []
-    for msgs in messages_batch:
-        parts = []
-        for msg in msgs:
-            parts.append(f"{msg['role']}: {msg['content']}")
-        prompts.append("\n\n".join(parts))
+    prompts = apply_chat_template_batch(tokenizer, messages_batch)
 
     # Path to LoRA checkpoint on the Modal volume
     lora_path = f"{CHECKPOINT_DIR}/{checkpoint_name}"
@@ -139,7 +137,7 @@ def main(
             prompts=batch,
             lora_path=lora_path,
             temperature=0.0,
-            max_tokens=2048,
+            max_tokens=3072,
         )
         all_completions.extend([r["text"] for r in results])
 

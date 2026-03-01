@@ -78,7 +78,7 @@ vllm_image = (
 # ---------------------------------------------------------------------------
 # GPU configurations
 # ---------------------------------------------------------------------------
-TEACHER_GPU = "A100-80GB"  # 32B model for baseline eval via vLLM
+TEACHER_GPU = "H200"  # 32B model for baseline eval via vLLM
 STUDENT_GPU = "A10G"  # 1.7B model, plenty of room
 TRAINING_GPU = "A100-80GB"  # Co-located teacher+student for OPD
 

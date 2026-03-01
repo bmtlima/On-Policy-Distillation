@@ -1,7 +1,9 @@
 .claude
 .DS_Store
 .env
+.venv/
 __pycache__/
 *.pyc
 results_*.json
+logs/
 wandb/

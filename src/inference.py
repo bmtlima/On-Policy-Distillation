@@ -36,6 +36,7 @@ from src.modal_app import (
     volumes={MODEL_CACHE_DIR: model_cache, CHECKPOINT_DIR: checkpoint_vol},
     timeout=3600,
     secrets=[modal.Secret.from_name("huggingface-secret")],
+    max_containers=5,
 )
 def generate_student(
     prompts: list[str],
@@ -94,6 +95,7 @@ def generate_student(
         result = {
             "text": completion.text,
             "token_ids": list(completion.token_ids),
+            "finish_reason": completion.finish_reason,
         }
         if logprobs is not None and completion.logprobs:
             # Extract the log-prob of the chosen token at each position
@@ -127,6 +129,7 @@ def generate_student(
     volumes={MODEL_CACHE_DIR: model_cache},
     timeout=7200,
     secrets=[modal.Secret.from_name("huggingface-secret")],
+    max_containers=2,
 )
 def generate_teacher(
     prompts: list[str],
@@ -168,6 +171,7 @@ def generate_teacher(
         result = {
             "text": completion.text,
             "token_ids": list(completion.token_ids),
+            "finish_reason": completion.finish_reason,
         }
         if logprobs is not None and completion.logprobs:
             token_logprobs = []
@@ -197,6 +201,7 @@ def generate_teacher(
     volumes={MODEL_CACHE_DIR: model_cache},
     timeout=7200,
     secrets=[modal.Secret.from_name("huggingface-secret")],
+    max_containers=2,
 )
 def compute_teacher_logprobs(
     prompts: list[str],
