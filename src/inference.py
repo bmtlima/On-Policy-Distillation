@@ -36,7 +36,7 @@ from src.modal_app import (
     volumes={MODEL_CACHE_DIR: model_cache, CHECKPOINT_DIR: checkpoint_vol},
     timeout=3600,
     secrets=[modal.Secret.from_name("huggingface-secret")],
-    max_containers=5,
+    max_containers=10,
 )
 def generate_student(
     prompts: list[str],

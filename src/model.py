@@ -1,4 +1,4 @@
-"""LoRA model setup for Qwen3-1.7B student.
+"""LoRA model setup for Qwen3-0.6B student.
 
 Applies LoRA adapters targeting attention projection layers
 with rank 64 for a good balance of capacity vs efficiency.
