@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+<meta charset='UTF-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0'>
+<title>OPD Token Log-Prob Visualization</title>
+<style>
+
+body {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    margin: 0;
+    padding: 24px;
+    line-height: 1.6;
+}
+h1 { color: #fff; font-size: 1.6em; margin-bottom: 4px; }
+h2 { color: #aaa; font-size: 1.1em; font-weight: normal; margin-top: 0; }
+.meta { color: #888; font-size: 0.85em; margin-bottom: 20px; }
+.meta b { color: #ccc; }
+.section { margin: 24px 0; }
+.section-title { color: #888; font-size: 0.8em; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+.token-flow {
+    line-height: 2.2;
+    font-size: 0.95em;
+    padding: 16px;
+    background: #111;
+    border-radius: 8px;
+    border: 1px solid #222;
+}
+.token {
+    display: inline;
+    padding: 2px 1px;
+    border-radius: 3px;
+    cursor: default;
+    position: relative;
+    color: #e0e0e0 !important;
+    white-space: pre-wrap;
+}
+.token:hover {
+    outline: 2px solid #fff;
+    outline-offset: 1px;
+    z-index: 10;
+}
+.tooltip {
+    display: none;
+    position: fixed;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 0.82em;
+    color: #ddd;
+    z-index: 1000;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    line-height: 1.5;
+}
+.tooltip .label { color: #888; }
+.tooltip .val { color: #fff; font-weight: bold; }
+.tooltip .pos { color: #4caf50; }
+.tooltip .neg { color: #ef5350; }
+
+.legend {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    margin: 16px 0;
+    font-size: 0.82em;
+    color: #888;
+}
+.legend-bar {
+    height: 14px;
+    width: 200px;
+    border-radius: 3px;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+}
+.stat-card {
+    background: #151515;
+    border: 1px solid #222;
+    border-radius: 6px;
+    padding: 12px 16px;
+}
+.stat-card .stat-label { color: #666; font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .stat-value { color: #fff; font-size: 1.3em; margin-top: 2px; }
+
+.top-tokens { margin: 16px 0; }
+.top-tokens table { border-collapse: collapse; width: 100%; font-size: 0.82em; }
+.top-tokens th { color: #666; text-align: left; padding: 6px 10px; border-bottom: 1px solid #222; font-weight: normal; text-transform: uppercase; font-size: 0.85em; letter-spacing: 0.5px; }
+.top-tokens td { padding: 5px 10px; border-bottom: 1px solid #1a1a1a; }
+.top-tokens code { background: #1a1a1a; padding: 2px 6px; border-radius: 3px; }
+
+</style>
+</head>
+<body>
+<h1>On-Policy Distillation: Per-Token Teacher Signal</h1>
+<h2>How the teacher (Qwen3-8B) grades every token of the student's (Qwen3-1.7B) solution</h2>
+<div class='meta'>
+<b>Problem:</b> Given that $\binom{15}{8}=6435$, $\binom{16}{9}=11440$, and $\binom{16}{10}=8008$, find $\binom{15}{10}$.<br>
+<b>Ground truth:</b> 3003 &nbsp;|&nbsp; 
+<b>Student predicted:</b> 3003 &nbsp;|&nbsp; 
+<b>Correct:</b> <span style='color:#4caf50'>True</span>
+</div>
+<div class='stats-grid'>
+<div class='stat-card'><div class='stat-label'>Tokens</div><div class='stat-value'>861</div></div>
+<div class='stat-card'><div class='stat-label'>Mean Student LP</div><div class='stat-value'>-0.1129</div></div>
+<div class='stat-card'><div class='stat-label'>Mean Teacher LP</div><div class='stat-value'>-0.1977</div></div>
+<div class='stat-card'><div class='stat-label'>Mean Advantage</div><div class='stat-value'>-0.0848</div></div>
+<div class='stat-card'><div class='stat-label'>Skewness</div><div class='stat-value'>-5.4</div></div>
+<div class='stat-card'><div class='stat-label'>% Positive (z-scored)</div><div class='stat-value'>86.4%</div></div>
+</div>
+<div class='legend'>
+<span>Teacher penalty</span>
+<span class='legend-bar' style='background: linear-gradient(to right, rgba(220,40,40,0.6), rgba(220,40,40,0.05), transparent, rgba(0,180,0,0.05), rgba(0,180,0,0.6))'></span>
+<span>Teacher reward</span>
+<span style='margin-left: 16px; color: #555;'>Hover any token for details</span>
+</div>
+<div class='section'>
+<div class='section-title'>Student completion — colored by teacher advantage</div>
+<div class='token-flow'>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="0" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">We</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="1" data-slp="-0.0001" data-tlp="-0.0000" data-adv="0.0000"> are</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="2" data-slp="-0.0015" data-tlp="-0.0086" data-adv="-0.0071"> given</span>
+<span class="token" style="background:rgba(220,40,40,0.34)" data-idx="3" data-slp="-0.2079" data-tlp="-1.0099" data-adv="-0.8020"> the</span>
+<span class="token" style="background:rgba(0,180,0,0.11)" data-idx="4" data-slp="-0.2146" data-tlp="-0.0517" data-adv="0.1630"> following</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="5" data-slp="-0.0542" data-tlp="-0.0794" data-adv="-0.0252"> bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="6" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">omial</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="7" data-slp="-0.0006" data-tlp="-0.0009" data-adv="-0.0004"> coefficients</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="8" data-slp="-0.0007" data-tlp="-0.0089" data-adv="-0.0082">:<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.41)" data-idx="9" data-slp="-1.1369" data-tlp="-0.1602" data-adv="0.9766">-</span>
+<span class="token" style="background:rgba(220,40,40,0.49)" data-idx="10" data-slp="-2.8120" data-tlp="-4.0182" data-adv="-1.2062"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="11" data-slp="-0.0000" data-tlp="-0.0015" data-adv="-0.0015"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="12" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="13" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="14" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="15" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="16" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="17" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="18" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">8</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="19" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="20" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="21" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="22" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="23" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="24" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="25" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="26" data-slp="-0.0012" data-tlp="-0.0067" data-adv="-0.0056"> $<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="27" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="28" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="29" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="30" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="31" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="32" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="33" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="34" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="35" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="36" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="37" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="38" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="39" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="40" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="41" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="42" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="43" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="44" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="45" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> $<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="46" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="47" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="48" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="49" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="50" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="51" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="52" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="53" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="54" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="55" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="56" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="57" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="58" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="59" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="60" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">8</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="61" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="62" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="63" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">8</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="64" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> $<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="65" data-slp="-0.0026" data-tlp="-0.0256" data-adv="-0.0229">We</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="66" data-slp="-0.0056" data-tlp="-0.0061" data-adv="-0.0005"> are</span>
+<span class="token" style="background:rgba(0,180,0,0.08)" data-idx="67" data-slp="-0.1613" data-tlp="-0.0791" data-adv="0.0821"> asked</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="68" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> to</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="69" data-slp="-0.0001" data-tlp="-0.0084" data-adv="-0.0083"> find</span>
+<span class="token" style="background:rgba(220,40,40,0.26)" data-idx="70" data-slp="-0.0033" data-tlp="-0.5879" data-adv="-0.5846"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="71" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="72" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="73" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="74" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="75" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="76" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="77" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="78" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="79" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="80" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="81" data-slp="-0.0004" data-tlp="-0.0048" data-adv="-0.0044"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="82" data-slp="-0.0001" data-tlp="-0.0004" data-adv="-0.0003">.<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="83" data-slp="-0.0006" data-tlp="-0.0054" data-adv="-0.0049">---<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="84" data-slp="-0.0001" data-tlp="-0.0003" data-adv="-0.0002">###</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="85" data-slp="-0.0034" data-tlp="-0.0144" data-adv="-0.0111"> Step</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="86" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="87" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="88" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">:</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="89" data-slp="-0.0022" data-tlp="-0.0117" data-adv="-0.0095"> Use</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="90" data-slp="-0.0067" data-tlp="-0.0780" data-adv="-0.0712"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="91" data-slp="-0.2394" data-tlp="-0.3532" data-adv="-0.1138"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.40)" data-idx="92" data-slp="-0.0122" data-tlp="-0.9648" data-adv="-0.9526"> for</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="93" data-slp="-0.0005" data-tlp="-0.0035" data-adv="-0.0030"> bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="94" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">omial</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="95" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> coefficients</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="96" data-slp="-0.0930" data-tlp="-0.0947" data-adv="-0.0016"><br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.09)" data-idx="97" data-slp="-0.8817" data-tlp="-0.7755" data-adv="0.1062">Rec</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="98" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">all</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="99" data-slp="-0.0237" data-tlp="-0.0249" data-adv="-0.0012"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.23)" data-idx="100" data-slp="-0.8345" data-tlp="-1.3343" data-adv="-0.4998"> **</span>
+<span class="token" style="background:rgba(220,40,40,0.41)" data-idx="101" data-slp="-0.1758" data-tlp="-1.1640" data-adv="-0.9882">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="102" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">omial</span>
+<span class="token" style="background:rgba(0,180,0,0.06)" data-idx="103" data-slp="-0.0489" data-tlp="-0.0236" data-adv="0.0253"> coefficient</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="104" data-slp="-0.0044" data-tlp="-0.0345" data-adv="-0.0300"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="105" data-slp="-0.0002" data-tlp="-0.0039" data-adv="-0.0037">**</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="106" data-slp="-0.0381" data-tlp="-0.0420" data-adv="-0.0039">:<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="107" data-slp="-0.0002" data-tlp="-0.0000" data-adv="0.0002">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="108" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="109" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="110" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="111" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="112" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">{n</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="113" data-slp="-0.0001" data-tlp="-0.0087" data-adv="-0.0087">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="114" data-slp="-0.0019" data-tlp="-0.0007" data-adv="0.0012">k</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="115" data-slp="-0.0000" data-tlp="-0.0003" data-adv="-0.0003">}</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="116" data-slp="-0.0000" data-tlp="-0.0380" data-adv="-0.0380"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="117" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="118" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="119" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="120" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{n</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="121" data-slp="-0.3871" data-tlp="-2.3504" data-adv="-1.9633">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="122" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">n</span>
+<span class="token" style="background:rgba(0,180,0,0.06)" data-idx="123" data-slp="-0.1269" data-tlp="-0.1002" data-adv="0.0267">-k</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="124" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="125" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="126" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.47)" data-idx="127" data-slp="-0.2119" data-tlp="-1.3645" data-adv="-1.1526">This</span>
+<span class="token" style="background:rgba(220,40,40,0.52)" data-idx="128" data-slp="-0.2479" data-tlp="-1.5330" data-adv="-1.2852"> means</span>
+<span class="token" style="background:rgba(0,180,0,0.21)" data-idx="129" data-slp="-1.7046" data-tlp="-1.2643" data-adv="0.4403"> that</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="130" data-slp="-0.0049" data-tlp="-0.1564" data-adv="-0.1515">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="131" data-slp="-0.0000" data-tlp="-0.0086" data-adv="-0.0086">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="132" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="133" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">\</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="134" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="135" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="136" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="137" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="138" data-slp="0.0000" data-tlp="-0.0007" data-adv="-0.0007">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="139" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="140" data-slp="-0.0003" data-tlp="-0.0036" data-adv="-0.0033">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="141" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="142" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="143" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="144" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="145" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="146" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="147" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="148" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="149" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="150" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.24)" data-idx="151" data-slp="-0.5759" data-tlp="-0.0549" data-adv="0.5211">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="152" data-slp="-0.0000" data-tlp="-0.0007" data-adv="-0.0007">}<br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="153" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="154" data-slp="0.0000" data-tlp="-0.0001" data-adv="-0.0001"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="155" data-slp="-0.0211" data-tlp="-0.1256" data-adv="-0.1045">So</span>
+<span class="token" style="background:rgba(220,40,40,0.39)" data-idx="156" data-slp="-0.4769" data-tlp="-1.4164" data-adv="-0.9396">,</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="157" data-slp="-0.4405" data-tlp="-0.5641" data-adv="-0.1236"> we</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="158" data-slp="-0.1071" data-tlp="-2.1198" data-adv="-2.0127"> need</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="159" data-slp="-0.0006" data-tlp="-0.0113" data-adv="-0.0107"> to</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="160" data-slp="-1.3163" data-tlp="-1.3263" data-adv="-0.0100"> compute</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="161" data-slp="-0.0015" data-tlp="-0.0081" data-adv="-0.0066"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="162" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="163" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="164" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="165" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="166" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="167" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="168" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="169" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="170" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="171" data-slp="-0.0078" data-tlp="-0.1295" data-adv="-0.1216"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.19)" data-idx="172" data-slp="-0.1230" data-tlp="-0.5042" data-adv="-0.3812">.<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="173" data-slp="-0.0004" data-tlp="-0.1523" data-adv="-0.1519">---<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="174" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">###</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="175" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> Step</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="176" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="177" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">2</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="178" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">:</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="179" data-slp="-0.0216" data-tlp="-0.0432" data-adv="-0.0216"> Use</span>
+<span class="token" style="background:rgba(220,40,40,0.19)" data-idx="180" data-slp="-0.0805" data-tlp="-0.4586" data-adv="-0.3782"> the</span>
+<span class="token" style="background:rgba(0,180,0,0.06)" data-idx="181" data-slp="-1.4720" data-tlp="-1.4525" data-adv="0.0195"> relationship</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="182" data-slp="-0.0003" data-tlp="-0.0086" data-adv="-0.0083"> between</span>
+<span class="token" style="background:rgba(0,180,0,0.15)" data-idx="183" data-slp="-0.9762" data-tlp="-0.7098" data-adv="0.2665"> bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="184" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">omial</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="185" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> coefficients</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="186" data-slp="-2.1727" data-tlp="-6.0626" data-adv="-3.8899"> and</span>
+<span class="token" style="background:rgba(0,180,0,0.20)" data-idx="187" data-slp="-0.7128" data-tlp="-0.3119" data-adv="0.4010"> Pascal</span>
+<span class="token" style="background:rgba(0,180,0,0.12)" data-idx="188" data-slp="-1.5019" data-tlp="-1.3133" data-adv="0.1887">’s</span>
+<span class="token" style="background:rgba(220,40,40,0.23)" data-idx="189" data-slp="-0.0860" data-tlp="-0.5849" data-adv="-0.4989"> triangle</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="190" data-slp="-0.0274" data-tlp="-0.0390" data-adv="-0.0116"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.16)" data-idx="191" data-slp="-0.0850" data-tlp="-0.3771" data-adv="-0.2921">We</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="192" data-slp="-0.2084" data-tlp="-0.3165" data-adv="-0.1080"> can</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="193" data-slp="-0.1164" data-tlp="-0.2984" data-adv="-0.1820"> use</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="194" data-slp="-0.0184" data-tlp="-0.0220" data-adv="-0.0037"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.14)" data-idx="195" data-slp="-0.5210" data-tlp="-0.7756" data-adv="-0.2546"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="196" data-slp="-0.0036" data-tlp="-0.0185" data-adv="-0.0149">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="197" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="198" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="199" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="200" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="201" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="202" data-slp="-0.0001" data-tlp="-0.0025" data-adv="-0.0024">{n</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="203" data-slp="-0.0395" data-tlp="-0.1003" data-adv="-0.0608">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="204" data-slp="-0.0001" data-tlp="-0.0000" data-adv="0.0000">k</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="205" data-slp="-0.0009" data-tlp="-0.0234" data-adv="-0.0225">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="206" data-slp="-0.0067" data-tlp="-0.0012" data-adv="0.0055"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="207" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="208" data-slp="-0.0001" data-tlp="-0.0041" data-adv="-0.0040">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="209" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="210" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{n</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="211" data-slp="-0.0001" data-tlp="-0.0002" data-adv="-0.0001">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="212" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="213" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="214" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">k</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="215" data-slp="-0.0181" data-tlp="-0.0380" data-adv="-0.0199">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="216" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="217" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="218" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="219" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="220" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="221" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="222" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{n</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="223" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="224" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="225" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="226" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">k</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="227" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="228" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="229" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.15)" data-idx="230" data-slp="-1.4325" data-tlp="-1.6963" data-adv="-0.2638">We</span>
+<span class="token" style="background:rgba(220,40,40,0.29)" data-idx="231" data-slp="-0.4344" data-tlp="-1.0850" data-adv="-0.6507"> can</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="232" data-slp="-1.9069" data-tlp="-4.7187" data-adv="-2.8118"> also</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="233" data-slp="-0.0785" data-tlp="-0.1687" data-adv="-0.0902"> use</span>
+<span class="token" style="background:rgba(0,180,0,0.10)" data-idx="234" data-slp="-0.5029" data-tlp="-0.3734" data-adv="0.1295"> the</span>
+<span class="token" style="background:rgba(0,180,0,0.24)" data-idx="235" data-slp="-1.9725" data-tlp="-1.4545" data-adv="0.5180"> fact</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="236" data-slp="-0.0020" data-tlp="-0.0037" data-adv="-0.0018"> that</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="237" data-slp="-0.0274" data-tlp="-0.0609" data-adv="-0.0336">:<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="238" data-slp="-0.0041" data-tlp="-0.0029" data-adv="0.0012">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="239" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="240" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="241" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="242" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.12)" data-idx="243" data-slp="-0.5759" data-tlp="-0.3869" data-adv="0.1891">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="244" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="245" data-slp="-0.1002" data-tlp="-0.1427" data-adv="-0.0425">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="246" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.38)" data-idx="247" data-slp="-0.1703" data-tlp="-1.0653" data-adv="-0.8950">9</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="248" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="249" data-slp="-0.0000" data-tlp="-0.0003" data-adv="-0.0003"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="250" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="251" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="252" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="253" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="254" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="255" data-slp="-0.0001" data-tlp="-0.0000" data-adv="0.0001">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="256" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="257" data-slp="-0.0000" data-tlp="-0.0004" data-adv="-0.0004">8</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="258" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="259" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="260" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="261" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="262" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="263" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="264" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="265" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="266" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="267" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="268" data-slp="-0.0001" data-tlp="-0.0015" data-adv="-0.0014">}<br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="269" data-slp="-0.0019" data-tlp="-0.0019" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="270" data-slp="-0.0002" data-tlp="-0.0032" data-adv="-0.0030"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.17)" data-idx="271" data-slp="-0.2850" data-tlp="-0.6094" data-adv="-0.3244">We</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="272" data-slp="-0.0402" data-tlp="-0.2266" data-adv="-0.1864"> are</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="273" data-slp="-0.0083" data-tlp="-0.0166" data-adv="-0.0083"> given</span>
+<span class="token" style="background:rgba(220,40,40,0.13)" data-idx="274" data-slp="-0.0832" data-tlp="-0.3058" data-adv="-0.2226">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="275" data-slp="-0.0298" data-tlp="-0.0486" data-adv="-0.0188">-</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="276" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="277" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="278" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="279" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="280" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="281" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="282" data-slp="-0.3869" data-tlp="-2.5789" data-adv="-2.1920">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="283" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="284" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">8</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="285" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="286" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="287" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="288" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="289" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="290" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="291" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="292" data-slp="-0.0010" data-tlp="-0.0001" data-adv="0.0009"> $<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="293" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">-</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="294" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="295" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="296" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="297" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="298" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="299" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="300" data-slp="-0.0003" data-tlp="0.0000" data-adv="0.0003">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="301" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="302" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="303" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="304" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="305" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="306" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="307" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="308" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="309" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="310" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="311" data-slp="-0.0040" data-tlp="-0.0001" data-adv="0.0039"> $<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="312" data-slp="-0.1090" data-tlp="-0.1528" data-adv="-0.0438">So</span>
+<span class="token" style="background:rgba(220,40,40,0.44)" data-idx="313" data-slp="-1.4338" data-tlp="-2.4971" data-adv="-1.0633">,<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="314" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="315" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.35)" data-idx="316" data-slp="-0.1602" data-tlp="-0.9741" data-adv="-0.8139">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="317" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="318" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="319" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="320" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="321" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.09)" data-idx="322" data-slp="-0.1269" data-tlp="-0.0052" data-adv="0.1217"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="323" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="324" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="325" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="326" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="327" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="328" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="329" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="330" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="331" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="332" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="333" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="334" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="335" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="336" data-slp="-0.0009" data-tlp="-0.0789" data-adv="-0.0780">}<br></span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="337" data-slp="-0.1269" data-tlp="-0.2014" data-adv="-0.0745">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="338" data-slp="-0.0006" data-tlp="-0.0052" data-adv="-0.0047"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.14)" data-idx="339" data-slp="-0.3967" data-tlp="-0.6359" data-adv="-0.2393">S</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="340" data-slp="-0.5759" data-tlp="-0.7576" data-adv="-0.1817">olve</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="341" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> for</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="342" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="343" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="344" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="345" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="346" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="347" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="348" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="349" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="350" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="351" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="352" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="353" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">:<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="354" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="355" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="356" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="357" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="358" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="359" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="360" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="361" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="362" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="363" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="364" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="365" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="366" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="367" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="368" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="369" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="370" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="371" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="372" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> -</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="373" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="374" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="375" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="376" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="377" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="378" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="379" data-slp="-0.0000" data-tlp="-0.0008" data-adv="-0.0008"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="380" data-slp="0.0000" data-tlp="-0.0013" data-adv="-0.0013">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="381" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="382" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="383" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="384" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="385" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="386" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.47)" data-idx="387" data-slp="-0.4987" data-tlp="-1.6502" data-adv="-1.1516">Now</span>
+<span class="token" style="background:rgba(220,40,40,0.19)" data-idx="388" data-slp="-0.3291" data-tlp="-0.6982" data-adv="-0.3692">,</span>
+<span class="token" style="background:rgba(220,40,40,0.13)" data-idx="389" data-slp="-0.3920" data-tlp="-0.6095" data-adv="-0.2175"> use</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="390" data-slp="-0.0018" data-tlp="-0.0417" data-adv="-0.0400"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.28)" data-idx="391" data-slp="-0.0566" data-tlp="-0.6863" data-adv="-0.6298"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.58)" data-idx="392" data-slp="-0.5936" data-tlp="-2.0295" data-adv="-1.4359">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="393" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="394" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="395" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="396" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="397" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="398" data-slp="-0.0003" data-tlp="-0.0001" data-adv="0.0002">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="399" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="400" data-slp="-0.0009" data-tlp="-0.1797" data-adv="-0.1788">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="401" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.13)" data-idx="402" data-slp="-0.1745" data-tlp="-0.3870" data-adv="-0.2126">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="403" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="404" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="405" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="406" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="407" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="408" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="409" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="410" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="411" data-slp="-0.0000" data-tlp="-0.0004" data-adv="-0.0004">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="412" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.22)" data-idx="413" data-slp="-0.0142" data-tlp="-0.4741" data-adv="-0.4600">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="414" data-slp="-0.0182" data-tlp="-0.0233" data-adv="-0.0052">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="415" data-slp="-0.0012" data-tlp="-0.0011" data-adv="0.0001">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="416" data-slp="-0.0000" data-tlp="-0.0004" data-adv="-0.0004"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.27)" data-idx="417" data-slp="-0.6201" data-tlp="-1.2246" data-adv="-0.6045">We</span>
+<span class="token" style="background:rgba(220,40,40,0.27)" data-idx="418" data-slp="-2.1420" data-tlp="-2.7379" data-adv="-0.5959"> also</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="419" data-slp="-0.3715" data-tlp="-0.4120" data-adv="-0.0405"> know</span>
+<span class="token" style="background:rgba(0,180,0,0.21)" data-idx="420" data-slp="-1.3010" data-tlp="-0.8734" data-adv="0.4275"> that</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="421" data-slp="-0.0002" data-tlp="-0.0028" data-adv="-0.0026">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="422" data-slp="-0.0001" data-tlp="-0.0004" data-adv="-0.0003">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="423" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="424" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="425" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="426" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="427" data-slp="-0.0025" data-tlp="-0.0003" data-adv="0.0022">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="428" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="429" data-slp="-0.0111" data-tlp="-0.0486" data-adv="-0.0376">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="430" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.37)" data-idx="431" data-slp="-0.0051" data-tlp="-0.8683" data-adv="-0.8633">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="432" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="433" data-slp="-0.0002" data-tlp="-0.1002" data-adv="-0.1001"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="434" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="435" data-slp="-0.0000" data-tlp="-0.0067" data-adv="-0.0067">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="436" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="437" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="438" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="439" data-slp="-0.1130" data-tlp="-0.2919" data-adv="-0.1788">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="440" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="441" data-slp="-0.0006" data-tlp="-0.0099" data-adv="-0.0093">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="442" data-slp="-0.0000" data-tlp="-0.0005" data-adv="-0.0005">0</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="443" data-slp="-0.0234" data-tlp="-0.0495" data-adv="-0.0261">}<br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="444" data-slp="-0.0004" data-tlp="-0.0054" data-adv="-0.0050">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="445" data-slp="-0.0000" data-tlp="-0.0006" data-adv="-0.0006"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.32)" data-idx="446" data-slp="-1.4931" data-tlp="-2.2311" data-adv="-0.7380">Now</span>
+<span class="token" style="background:rgba(220,40,40,0.19)" data-idx="447" data-slp="-1.0435" data-tlp="-1.4212" data-adv="-0.3777"> use</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="448" data-slp="-0.0343" data-tlp="-0.1302" data-adv="-0.0959"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="449" data-slp="-0.0238" data-tlp="-0.1609" data-adv="-0.1370"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.35)" data-idx="450" data-slp="-0.2652" data-tlp="-1.0742" data-adv="-0.8089">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="451" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="452" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="453" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="454" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="455" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.08)" data-idx="456" data-slp="-0.0789" data-tlp="-0.0012" data-adv="0.0777">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="457" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="458" data-slp="-0.0052" data-tlp="-0.1603" data-adv="-0.1551">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="459" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="460" data-slp="-0.0233" data-tlp="-2.2167" data-adv="-2.1934">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="461" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="462" data-slp="-0.0000" data-tlp="-0.0232" data-adv="-0.0232"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="463" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="464" data-slp="-0.0000" data-tlp="-0.0013" data-adv="-0.0013">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="465" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="466" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="467" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="468" data-slp="-0.0006" data-tlp="-0.0280" data-adv="-0.0274">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="469" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="470" data-slp="0.0000" data-tlp="-0.0004" data-adv="-0.0004">4</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="471" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="472" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="473" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="474" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="475" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="476" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="477" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="478" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="479" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="480" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="481" data-slp="-0.0000" data-tlp="-0.0002" data-adv="-0.0002">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="482" data-slp="-0.0003" data-tlp="-0.0002" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="483" data-slp="-0.0000" data-tlp="-0.0003" data-adv="-0.0003"><br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.21)" data-idx="484" data-slp="-0.7794" data-tlp="-0.3388" data-adv="0.4406">But</span>
+<span class="token" style="background:rgba(0,180,0,0.12)" data-idx="485" data-slp="-1.2860" data-tlp="-1.0871" data-adv="0.1989"> we</span>
+<span class="token" style="background:rgba(220,40,40,0.27)" data-idx="486" data-slp="-0.3624" data-tlp="-0.9753" data-adv="-0.6128"> can</span>
+<span class="token" style="background:rgba(220,40,40,0.16)" data-idx="487" data-slp="-0.7429" data-tlp="-1.0304" data-adv="-0.2874"> also</span>
+<span class="token" style="background:rgba(220,40,40,0.14)" data-idx="488" data-slp="-0.2059" data-tlp="-0.4613" data-adv="-0.2554"> use</span>
+<span class="token" style="background:rgba(0,180,0,0.26)" data-idx="489" data-slp="-2.3856" data-tlp="-1.8126" data-adv="0.5730"> another</span>
+<span class="token" style="background:rgba(220,40,40,0.27)" data-idx="490" data-slp="-0.1164" data-tlp="-0.7082" data-adv="-0.5918"> identity</span>
+<span class="token" style="background:rgba(0,180,0,0.08)" data-idx="491" data-slp="-1.5490" data-tlp="-1.4796" data-adv="0.0693"> to</span>
+<span class="token" style="background:rgba(220,40,40,0.21)" data-idx="492" data-slp="-0.8915" data-tlp="-1.3339" data-adv="-0.4424"> find</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="493" data-slp="-0.0234" data-tlp="-0.0396" data-adv="-0.0162"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="494" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="495" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="496" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="497" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="498" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="499" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="500" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="501" data-slp="-0.0000" data-tlp="-1.7070" data-adv="-1.7070">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="502" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="503" data-slp="-0.0214" data-tlp="-0.0500" data-adv="-0.0286"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.45)" data-idx="504" data-slp="-1.8233" data-tlp="-2.9182" data-adv="-1.0949"> in</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="505" data-slp="-0.0146" data-tlp="-0.1043" data-adv="-0.0898"> terms</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="506" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> of</span>
+<span class="token" style="background:rgba(220,40,40,0.27)" data-idx="507" data-slp="-1.4586" data-tlp="-2.0630" data-adv="-0.6044"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="508" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="509" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="510" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="511" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="512" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="513" data-slp="-0.0003" data-tlp="-0.2034" data-adv="-0.2031">6</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="514" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="515" data-slp="-0.0087" data-tlp="-1.6222" data-adv="-1.6136">9</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="516" data-slp="-0.0000" data-tlp="-0.0067" data-adv="-0.0067">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="517" data-slp="-0.0109" data-tlp="-0.0044" data-adv="0.0065"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.52)" data-idx="518" data-slp="-1.1731" data-tlp="-2.4489" data-adv="-1.2758"> or</span>
+<span class="token" style="background:rgba(0,180,0,0.11)" data-idx="519" data-slp="-0.4334" data-tlp="-0.2707" data-adv="0.1627"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="520" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="521" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="522" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="523" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="524" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="525" data-slp="-0.0001" data-tlp="-0.0032" data-adv="-0.0031">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="526" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="527" data-slp="-0.0000" data-tlp="-0.0009" data-adv="-0.0009">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="528" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="529" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="530" data-slp="-0.0599" data-tlp="-0.1856" data-adv="-0.1257"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.15)" data-idx="531" data-slp="-0.2032" data-tlp="-0.4855" data-adv="-0.2823">.<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.49)" data-idx="532" data-slp="-0.2574" data-tlp="-1.4448" data-adv="-1.1874">---<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="533" data-slp="-0.0000" data-tlp="-0.0033" data-adv="-0.0033">###</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="534" data-slp="-0.0005" data-tlp="-0.0071" data-adv="-0.0066"> Step</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="535" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="536" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">3</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="537" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">:</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="538" data-slp="-0.0013" data-tlp="-0.0449" data-adv="-0.0436"> Use</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="539" data-slp="-0.1898" data-tlp="-0.3302" data-adv="-0.1404"> the</span>
+<span class="token" style="background:rgba(0,180,0,0.12)" data-idx="540" data-slp="-3.2387" data-tlp="-3.0564" data-adv="0.1823"> relation</span>
+<span class="token" style="background:rgba(0,180,0,0.06)" data-idx="541" data-slp="-0.1441" data-tlp="-0.1163" data-adv="0.0278"> between</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="542" data-slp="-0.0462" data-tlp="-0.2490" data-adv="-0.2028"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="543" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="544" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="545" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="546" data-slp="-0.0110" data-tlp="-0.0789" data-adv="-0.0678">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="547" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.24)" data-idx="548" data-slp="-0.0052" data-tlp="-0.5231" data-adv="-0.5179">6</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="549" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.20)" data-idx="550" data-slp="-1.1599" data-tlp="-1.5814" data-adv="-0.4215">9</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="551" data-slp="-0.0002" data-tlp="-0.0232" data-adv="-0.0230">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="552" data-slp="-0.0000" data-tlp="-0.0020" data-adv="-0.0020"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="553" data-slp="-0.0142" data-tlp="-0.1603" data-adv="-0.1461"> and</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="554" data-slp="-0.0000" data-tlp="-0.0002" data-adv="-0.0002"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="555" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="556" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="557" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="558" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="559" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="560" data-slp="-0.0067" data-tlp="-0.0086" data-adv="-0.0019">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="561" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="562" data-slp="-0.0110" data-tlp="-2.1659" data-adv="-2.1549">8</span>
+<span class="token" style="background:rgba(220,40,40,0.26)" data-idx="563" data-slp="-0.0005" data-tlp="-0.5760" data-adv="-0.5755">}</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="564" data-slp="-0.1130" data-tlp="-2.9371" data-adv="-2.8241"> $<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.07)" data-idx="565" data-slp="-0.3403" data-tlp="-0.2927" data-adv="0.0476">We</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="566" data-slp="-2.9601" data-tlp="-6.1058" data-adv="-3.1457"> use</span>
+<span class="token" style="background:rgba(220,40,40,0.18)" data-idx="567" data-slp="-0.1012" data-tlp="-0.4528" data-adv="-0.3516"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.10)" data-idx="568" data-slp="-0.0083" data-tlp="-0.1498" data-adv="-0.1415"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="569" data-slp="-0.0068" data-tlp="-0.1292" data-adv="-0.1223">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="570" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="571" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="572" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="573" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="574" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="575" data-slp="-0.0032" data-tlp="-0.0486" data-adv="-0.0454">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="576" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="577" data-slp="-0.0000" data-tlp="-0.0036" data-adv="-0.0036">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="578" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.15)" data-idx="579" data-slp="-0.0000" data-tlp="-0.2843" data-adv="-0.2842">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="580" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="581" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="582" data-slp="0.0000" data-tlp="-0.0002" data-adv="-0.0002"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="583" data-slp="0.0000" data-tlp="-0.0001" data-adv="-0.0001">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="584" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="585" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="586" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="587" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="588" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="589" data-slp="0.0000" data-tlp="-0.0486" data-adv="-0.0486">8</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="590" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="591" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="592" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="593" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="594" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="595" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="596" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="597" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="598" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="599" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">9</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="600" data-slp="-0.0025" data-tlp="-0.0789" data-adv="-0.0764">}<br></span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="601" data-slp="-0.0009" data-tlp="-0.0185" data-adv="-0.0176">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="602" data-slp="-0.0001" data-tlp="-0.0142" data-adv="-0.0141"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="603" data-slp="-0.1118" data-tlp="-0.1548" data-adv="-0.0429">We</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="604" data-slp="-0.1179" data-tlp="-0.1852" data-adv="-0.0673"> already</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="605" data-slp="-1.1162" data-tlp="-3.4721" data-adv="-2.3559"> know</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="606" data-slp="-0.0552" data-tlp="-0.1339" data-adv="-0.0788">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="607" data-slp="-0.0142" data-tlp="-0.0380" data-adv="-0.0239">-</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="608" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="609" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="610" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="611" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="612" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="613" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.18)" data-idx="614" data-slp="-0.0001" data-tlp="-0.3485" data-adv="-0.3484">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="615" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="616" data-slp="-0.0000" data-tlp="-0.0699" data-adv="-0.0699">8</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="617" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="618" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="619" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="620" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="621" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="622" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="623" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="624" data-slp="-0.0004" data-tlp="-0.0001" data-adv="0.0002"> $<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="625" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">-</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="626" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="627" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="628" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="629" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="630" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="631" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="632" data-slp="-0.0000" data-tlp="-0.2014" data-adv="-0.2014">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="633" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="634" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">9</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="635" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="636" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="637" data-slp="-0.0000" data-tlp="-0.0002" data-adv="-0.0002"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="638" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="639" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="640" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="641" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.32)" data-idx="642" data-slp="-0.0106" data-tlp="-0.7601" data-adv="-0.7495"> $<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="643" data-slp="-0.0639" data-tlp="-0.1631" data-adv="-0.0991">So</span>
+<span class="token" style="background:rgba(0,180,0,0.11)" data-idx="644" data-slp="-0.7001" data-tlp="-0.5441" data-adv="0.1560">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="645" data-slp="-0.0002" data-tlp="-0.0022" data-adv="-0.0020">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="646" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="647" data-slp="-0.0000" data-tlp="-0.0011" data-adv="-0.0010">\</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="648" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="649" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="650" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="651" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="652" data-slp="0.0000" data-tlp="-0.0430" data-adv="-0.0430">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="653" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="654" data-slp="-0.0000" data-tlp="-0.0012" data-adv="-0.0012">9</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="655" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="656" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="657" data-slp="-0.0000" data-tlp="-0.0002" data-adv="-0.0002"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="658" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">6</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="659" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="660" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="661" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="662" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="663" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="664" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="665" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="666" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="667" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="668" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="669" data-slp="-0.0000" data-tlp="-0.0006" data-adv="-0.0005"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="670" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="671" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="672" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="673" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="674" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.16)" data-idx="675" data-slp="-1.1370" data-tlp="-0.8265" data-adv="0.3105"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.06)" data-idx="676" data-slp="-0.0232" data-tlp="-0.0009" data-adv="0.0223">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="677" data-slp="-0.0001" data-tlp="-0.0012" data-adv="-0.0011"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.31)" data-idx="678" data-slp="-0.4372" data-tlp="-1.1457" data-adv="-0.7086">This</span>
+<span class="token" style="background:rgba(0,180,0,0.25)" data-idx="679" data-slp="-1.6598" data-tlp="-1.1043" data-adv="0.5555"> checks</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="680" data-slp="-0.0006" data-tlp="-0.0002" data-adv="0.0004"> out</span>
+<span class="token" style="background:rgba(220,40,40,0.20)" data-idx="681" data-slp="-0.2868" data-tlp="-0.6990" data-adv="-0.4122">.<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.40)" data-idx="682" data-slp="-0.2224" data-tlp="-1.1703" data-adv="-0.9479">---<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="683" data-slp="-0.0000" data-tlp="-0.0640" data-adv="-0.0640">###</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="684" data-slp="-0.0003" data-tlp="-0.0001" data-adv="0.0001"> Step</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="685" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="686" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="687" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">:</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="688" data-slp="-0.1955" data-tlp="-0.3630" data-adv="-0.1675"> Use</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="689" data-slp="-0.1024" data-tlp="-0.2537" data-adv="-0.1513"> the</span>
+<span class="token" style="background:rgba(220,40,40,0.46)" data-idx="690" data-slp="-2.8768" data-tlp="-3.9999" data-adv="-1.1231"> symmetry</span>
+<span class="token" style="background:rgba(220,40,40,0.60)" data-idx="691" data-slp="-2.8550" data-tlp="-5.9295" data-adv="-3.0745"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="692" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="693" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="694" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="695" data-slp="-0.0086" data-tlp="-0.0182" data-adv="-0.0095">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="696" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="697" data-slp="-0.0000" data-tlp="-0.0098" data-adv="-0.0097">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="698" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="699" data-slp="-0.0202" data-tlp="-0.0429" data-adv="-0.0227">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="700" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="701" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="702" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="703" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="704" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="705" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="706" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="707" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="708" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="709" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="710" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="711" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="712" data-slp="-0.0233" data-tlp="-0.0161" data-adv="0.0072"> $<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.22)" data-idx="713" data-slp="-3.0704" data-tlp="-2.6029" data-adv="0.4675">So</span>
+<span class="token" style="background:rgba(220,40,40,0.15)" data-idx="714" data-slp="-0.7661" data-tlp="-1.0459" data-adv="-0.2798">,</span>
+<span class="token" style="background:rgba(220,40,40,0.13)" data-idx="715" data-slp="-0.1998" data-tlp="-0.4059" data-adv="-0.2061"> we</span>
+<span class="token" style="background:rgba(220,40,40,0.23)" data-idx="716" data-slp="-0.8539" data-tlp="-1.3525" data-adv="-0.4987"> now</span>
+<span class="token" style="background:rgba(220,40,40,0.21)" data-idx="717" data-slp="-0.6532" data-tlp="-1.0918" data-adv="-0.4387"> need</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="718" data-slp="-0.0412" data-tlp="-0.1083" data-adv="-0.0671"> to</span>
+<span class="token" style="background:rgba(220,40,40,0.17)" data-idx="719" data-slp="-0.2174" data-tlp="-0.5519" data-adv="-0.3346"> compute</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="720" data-slp="-0.0381" data-tlp="-0.0634" data-adv="-0.0253"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="721" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="722" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="723" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="724" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="725" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="726" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="727" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="728" data-slp="0.0000" data-tlp="-0.0001" data-adv="-0.0001">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="729" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.28)" data-idx="730" data-slp="-1.9866" data-tlp="-1.3602" data-adv="0.6264"> $.</span>
+<span class="token" style="background:rgba(0,180,0,0.12)" data-idx="731" data-slp="-1.0024" data-tlp="-0.8225" data-adv="0.1799"> We</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="732" data-slp="-0.0123" data-tlp="-0.0763" data-adv="-0.0640"> can</span>
+<span class="token" style="background:rgba(220,40,40,0.23)" data-idx="733" data-slp="-0.2631" data-tlp="-0.7407" data-adv="-0.4776"> use</span>
+<span class="token" style="background:rgba(220,40,40,0.09)" data-idx="734" data-slp="-0.0930" data-tlp="-0.2055" data-adv="-0.1125"> the</span>
+<span class="token" style="background:rgba(0,180,0,0.26)" data-idx="735" data-slp="-1.2455" data-tlp="-0.6744" data-adv="0.5711"> identity</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="736" data-slp="-0.0141" data-tlp="-0.1647" data-adv="-0.1506">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="737" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="738" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="739" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">\</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="740" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="741" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="742" data-slp="-0.0620" data-tlp="-0.0620" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="743" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.11)" data-idx="744" data-slp="-0.0001" data-tlp="-0.1603" data-adv="-0.1602">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="745" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="746" data-slp="-0.0004" data-tlp="-0.0086" data-adv="-0.0083">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="747" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="748" data-slp="-0.0000" data-tlp="-0.0022" data-adv="-0.0022"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="749" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="750" data-slp="-0.0002" data-tlp="-0.0620" data-adv="-0.0618">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="751" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="752" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="753" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="754" data-slp="-0.0093" data-tlp="-0.0744" data-adv="-0.0651">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="755" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="756" data-slp="-0.0000" data-tlp="-0.0009" data-adv="-0.0009">4</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="757" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="758" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="759" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="760" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="761" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="762" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="763" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="764" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="765" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="766" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="767" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="768" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="769" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.21)" data-idx="770" data-slp="-1.5025" data-tlp="-1.0772" data-adv="0.4253">We</span>
+<span class="token" style="background:rgba(220,40,40,0.28)" data-idx="771" data-slp="-3.2744" data-tlp="-3.9145" data-adv="-0.6401"> know</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="772" data-slp="-0.5414" data-tlp="-0.7339" data-adv="-0.1926">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.14)" data-idx="773" data-slp="-0.0789" data-tlp="-0.3137" data-adv="-0.2348">-</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="774" data-slp="-0.0000" data-tlp="-0.0011" data-adv="-0.0011"> $</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="775" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> \</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="776" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">bin</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="777" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">om</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="778" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="779" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.17)" data-idx="780" data-slp="-0.0108" data-tlp="-0.3281" data-adv="-0.3173">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="781" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="782" data-slp="-0.0015" data-tlp="-0.0299" data-adv="-0.0284">4</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="783" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="784" data-slp="-0.0002" data-tlp="-0.0061" data-adv="-0.0059"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.19)" data-idx="785" data-slp="-0.0015" data-tlp="-0.3876" data-adv="-0.3861"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="786" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="787" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="788" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="789" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.08)" data-idx="790" data-slp="-0.0144" data-tlp="-0.0901" data-adv="-0.0756"> $<br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="791" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">-</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="792" data-slp="-0.0000" data-tlp="-0.0005" data-adv="-0.0005"> $</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="793" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> \</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="794" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="795" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="796" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="797" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="798" data-slp="0.0000" data-tlp="-0.0001" data-adv="-0.0001">4</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="799" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="800" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="801" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="802" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="803" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0000"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="804" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">2</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="805" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="806" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="807" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">2</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="808" data-slp="-0.0018" data-tlp="-0.0093" data-adv="-0.0074"> $<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.30)" data-idx="809" data-slp="-3.3288" data-tlp="-4.0227" data-adv="-0.6939">Thus</span>
+<span class="token" style="background:rgba(220,40,40,0.43)" data-idx="810" data-slp="-1.3133" data-tlp="-2.3502" data-adv="-1.0369">,<br><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="811" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="812" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="813" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">\</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="814" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">bin</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="815" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">om</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="816" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">{</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="817" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="818" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="819" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">}{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="820" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">5</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="821" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">}</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="822" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="823" data-slp="-0.0001" data-tlp="-0.0076" data-adv="-0.0075"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="824" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="825" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="826" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="827" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">1</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="828" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> +</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="829" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"> </span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="830" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">2</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="831" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="832" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="833" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">2</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="834" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000"> =</span>
+<span class="token" style="background:rgba(220,40,40,0.12)" data-idx="835" data-slp="-0.0025" data-tlp="-0.2014" data-adv="-0.1989"> </span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="836" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="837" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="838" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="839" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="840" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="841" data-slp="-0.0000" data-tlp="-0.0002" data-adv="-0.0002">$$</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="842" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000"><br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.22)" data-idx="843" data-slp="-0.3891" data-tlp="-0.8637" data-adv="-0.4745">---<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="844" data-slp="-0.0000" data-tlp="-0.0000" data-adv="-0.0000">###</span>
+<span class="token" style="background:rgba(220,40,40,0.48)" data-idx="845" data-slp="-0.5760" data-tlp="-1.7416" data-adv="-1.1657"> �</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="846" data-slp="-0.0000" data-tlp="0.0000" data-adv="0.0000">�</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="847" data-slp="-0.0000" data-tlp="-0.0001" data-adv="-0.0001"> Final</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="848" data-slp="-0.0000" data-tlp="-0.0006" data-adv="-0.0005"> Answer</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="849" data-slp="-0.0027" data-tlp="-0.0080" data-adv="-0.0053">:<br><br></span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="850" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">$$</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="851" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000"><br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="852" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">\</span>
+<span class="token" style="background:rgba(220,40,40,0.07)" data-idx="853" data-slp="-0.0110" data-tlp="-0.0699" data-adv="-0.0589">boxed</span>
+<span class="token" style="background:rgba(220,40,40,0.06)" data-idx="854" data-slp="-0.0012" data-tlp="-0.0298" data-adv="-0.0286">{</span>
+<span class="token" style="background:rgba(220,40,40,0.05)" data-idx="855" data-slp="0.0000" data-tlp="-0.0000" data-adv="-0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="856" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="857" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">0</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="858" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">3</span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="859" data-slp="-0.0000" data-tlp="-0.0000" data-adv="0.0000">}<br></span>
+<span class="token" style="background:rgba(0,180,0,0.05)" data-idx="860" data-slp="0.0000" data-tlp="0.0000" data-adv="0.0000">$$</span>
+</div>
+</div>
+<div class='section'>
+<div class='section-title'>Top 15 Penalized Tokens (forking tokens)</div>
+<div class='top-tokens'><table>
+<tr><th>#</th><th>Idx</th><th>Token</th><th>Student LP</th><th>Teacher LP</th><th>Advantage</th></tr>
+<tr><td>1</td><td>186</td><td><code> and</code></td><td>-2.173</td><td>-6.063</td><td style='color:#ef5350'>-3.890</td></tr>
+<tr><td>2</td><td>566</td><td><code> use</code></td><td>-2.960</td><td>-6.106</td><td style='color:#ef5350'>-3.146</td></tr>
+<tr><td>3</td><td>691</td><td><code> $</code></td><td>-2.855</td><td>-5.929</td><td style='color:#ef5350'>-3.074</td></tr>
+<tr><td>4</td><td>564</td><td><code> $\n\n</code></td><td>-0.113</td><td>-2.937</td><td style='color:#ef5350'>-2.824</td></tr>
+<tr><td>5</td><td>232</td><td><code> also</code></td><td>-1.907</td><td>-4.719</td><td style='color:#ef5350'>-2.812</td></tr>
+<tr><td>6</td><td>605</td><td><code> know</code></td><td>-1.116</td><td>-3.472</td><td style='color:#ef5350'>-2.356</td></tr>
+<tr><td>7</td><td>460</td><td><code>5</code></td><td>-0.023</td><td>-2.217</td><td style='color:#ef5350'>-2.193</td></tr>
+<tr><td>8</td><td>282</td><td><code>5</code></td><td>-0.387</td><td>-2.579</td><td style='color:#ef5350'>-2.192</td></tr>
+<tr><td>9</td><td>562</td><td><code>8</code></td><td>-0.011</td><td>-2.166</td><td style='color:#ef5350'>-2.155</td></tr>
+<tr><td>10</td><td>158</td><td><code> need</code></td><td>-0.107</td><td>-2.120</td><td style='color:#ef5350'>-2.013</td></tr>
+<tr><td>11</td><td>121</td><td><code>}{</code></td><td>-0.387</td><td>-2.350</td><td style='color:#ef5350'>-1.963</td></tr>
+<tr><td>12</td><td>501</td><td><code>5</code></td><td>-0.000</td><td>-1.707</td><td style='color:#ef5350'>-1.707</td></tr>
+<tr><td>13</td><td>515</td><td><code>9</code></td><td>-0.009</td><td>-1.622</td><td style='color:#ef5350'>-1.614</td></tr>
+<tr><td>14</td><td>392</td><td><code>:\n\n</code></td><td>-0.594</td><td>-2.029</td><td style='color:#ef5350'>-1.436</td></tr>
+<tr><td>15</td><td>128</td><td><code> means</code></td><td>-0.248</td><td>-1.533</td><td style='color:#ef5350'>-1.285</td></tr>
+</table></div>
+</div>
+<div class='section'>
+<div class='section-title'>Top 15 Rewarded Tokens</div>
+<div class='top-tokens'><table>
+<tr><th>#</th><th>Idx</th><th>Token</th><th>Student LP</th><th>Teacher LP</th><th>Advantage</th></tr>
+<tr><td>1</td><td>9</td><td><code>-</code></td><td>-1.137</td><td>-0.160</td><td style='color:#4caf50'>+0.977</td></tr>
+<tr><td>2</td><td>730</td><td><code> $.</code></td><td>-1.987</td><td>-1.360</td><td style='color:#4caf50'>+0.626</td></tr>
+<tr><td>3</td><td>489</td><td><code> another</code></td><td>-2.386</td><td>-1.813</td><td style='color:#4caf50'>+0.573</td></tr>
+<tr><td>4</td><td>735</td><td><code> identity</code></td><td>-1.246</td><td>-0.674</td><td style='color:#4caf50'>+0.571</td></tr>
+<tr><td>5</td><td>679</td><td><code> checks</code></td><td>-1.660</td><td>-1.104</td><td style='color:#4caf50'>+0.555</td></tr>
+<tr><td>6</td><td>151</td><td><code>5</code></td><td>-0.576</td><td>-0.055</td><td style='color:#4caf50'>+0.521</td></tr>
+<tr><td>7</td><td>235</td><td><code> fact</code></td><td>-1.973</td><td>-1.455</td><td style='color:#4caf50'>+0.518</td></tr>
+<tr><td>8</td><td>713</td><td><code>So</code></td><td>-3.070</td><td>-2.603</td><td style='color:#4caf50'>+0.467</td></tr>
+<tr><td>9</td><td>484</td><td><code>But</code></td><td>-0.779</td><td>-0.339</td><td style='color:#4caf50'>+0.441</td></tr>
+<tr><td>10</td><td>129</td><td><code> that</code></td><td>-1.705</td><td>-1.264</td><td style='color:#4caf50'>+0.440</td></tr>
+<tr><td>11</td><td>420</td><td><code> that</code></td><td>-1.301</td><td>-0.873</td><td style='color:#4caf50'>+0.428</td></tr>
+<tr><td>12</td><td>770</td><td><code>We</code></td><td>-1.503</td><td>-1.077</td><td style='color:#4caf50'>+0.425</td></tr>
+<tr><td>13</td><td>187</td><td><code> Pascal</code></td><td>-0.713</td><td>-0.312</td><td style='color:#4caf50'>+0.401</td></tr>
+<tr><td>14</td><td>675</td><td><code>\n</code></td><td>-1.137</td><td>-0.826</td><td style='color:#4caf50'>+0.310</td></tr>
+<tr><td>15</td><td>183</td><td><code> bin</code></td><td>-0.976</td><td>-0.710</td><td style='color:#4caf50'>+0.266</td></tr>
+</table></div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+<script>
+const tooltip = document.getElementById('tooltip');
+document.querySelectorAll('.token').forEach(el => {
+    el.addEventListener('mouseenter', e => {
+        const idx = el.dataset.idx;
+        const slp = parseFloat(el.dataset.slp);
+        const tlp = parseFloat(el.dataset.tlp);
+        const adv = parseFloat(el.dataset.adv);
+        const advClass = adv >= 0 ? 'pos' : 'neg';
+        const advSign = adv >= 0 ? '+' : '';
+        tooltip.innerHTML = `
+            <span class="label">Token #</span><span class="val">${idx}</span><br>
+            <span class="label">Student LP: </span><span class="val">${slp.toFixed(4)}</span><br>
+            <span class="label">Teacher LP: </span><span class="val">${tlp.toFixed(4)}</span><br>
+            <span class="label">Advantage:  </span><span class="${advClass} val">${advSign}${adv.toFixed(4)}</span>
+        `;
+        tooltip.style.display = 'block';
+    });
+    el.addEventListener('mousemove', e => {
+        tooltip.style.left = (e.clientX + 12) + 'px';
+        tooltip.style.top = (e.clientY + 12) + 'px';
+    });
+    el.addEventListener('mouseleave', () => {
+        tooltip.style.display = 'none';
+    });
+});
+</script>
+
+</body></html>
