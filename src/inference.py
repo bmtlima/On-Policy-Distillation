@@ -45,39 +45,29 @@ def generate_student(
     max_tokens: int = 2048,
     top_p: float = 0.95,
     logprobs: int | None = None,
-    lora_path: str | None = None,
 ) -> list[dict]:
     """Generate completions from the student model using vLLM.
 
     Args:
         prompts: List of formatted prompt strings.
-        model_id: HuggingFace model ID.
+        model_id: HuggingFace model ID or path to checkpoint.
         temperature: Sampling temperature.
         max_tokens: Maximum new tokens to generate.
         top_p: Nucleus sampling threshold.
         logprobs: If set, return this many top log-probs per token.
-        lora_path: Optional path to LoRA adapter on the checkpoint volume.
 
     Returns:
         List of dicts with keys: text, token_ids, logprobs (if requested).
     """
     from vllm import LLM, SamplingParams
 
-    enable_lora = lora_path is not None
     llm = LLM(
         model=model_id,
         download_dir=MODEL_CACHE_DIR,
         trust_remote_code=True,
         max_model_len=4096,
-        enable_lora=enable_lora,
         dtype="float16",
     )
-
-    from vllm.lora.request import LoRARequest
-
-    lora_request = None
-    if lora_path:
-        lora_request = LoRARequest("student-lora", 1, lora_path)
 
     params = SamplingParams(
         temperature=temperature,
@@ -87,7 +77,7 @@ def generate_student(
         prompt_logprobs=None,
     )
 
-    outputs = llm.generate(prompts, params, lora_request=lora_request)
+    outputs = llm.generate(prompts, params)
 
     results = []
     for output in outputs:

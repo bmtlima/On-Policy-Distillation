@@ -1,11 +1,12 @@
 """Run on-policy distillation training on Modal.
 
-Co-locates teacher (NF4 ~18GB) and student (BF16+LoRA ~5GB) on a single A100-80GB.
+Co-locates teacher (BF16 ~17GB) and student (BF16 ~1.2GB) on a single H200.
 
 Usage:
-    modal run run_train.py                         # Full training run
-    modal run run_train.py --num-steps 10          # Quick test (10 steps)
-    modal run run_train.py --skip-sanity-check     # Skip teacher sanity check
+    modal run run_train.py                                          # Full training run
+    modal run run_train.py --num-steps 10                           # Quick test (10 steps)
+    modal run run_train.py --teacher-model-name Qwen/Qwen3-14B     # Use a different teacher
+    modal run run_train.py --skip-sanity-check                      # Skip teacher sanity check
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from src.modal_app import (
     image=training_image,
     gpu=TRAINING_GPU,
     volumes={MODEL_CACHE_DIR: model_cache, CHECKPOINT_DIR: checkpoint_vol},
-    timeout=14400,  # 4 hours
+    timeout=21600,  # 6 hours
     secrets=[
         modal.Secret.from_name("huggingface-secret"),
         modal.Secret.from_name("wandb-secret-bruno"),
@@ -37,19 +38,20 @@ from src.modal_app import (
 )
 def train(
     num_steps: int = 150,
-    batch_size: int = 8,
+    batch_size: int = 32,
     num_samples_per_prompt: int = 4,
-    lr: float = 1e-5,
-    max_new_tokens: int = 2048,
+    lr: float = 3e-6,
+    max_new_tokens: int = 1024,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
     limit: int = 0,
     skip_sanity_check: bool = False,
     wandb_run_name: str | None = None,
+    teacher_model_name: str = TEACHER_MODEL_ID,
 ):
-    """Run OPD training on a single A100-80GB.
+    """Run OPD training on a single H200.
 
-    Loads both teacher (NF4) and student (BF16+LoRA) on the same GPU,
+    Loads both teacher (BF16) and student (BF16) on the same GPU,
     then runs the on-policy distillation loop.
     """
     import torch
@@ -66,24 +68,27 @@ def train(
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
-    # Load teacher model with NF4 quantization (~18GB)
-    print("\nLoading teacher model (NF4 quantized)...")
+    # Load teacher model in BF16 (no quantization — clean logprobs)
+    print(f"\nLoading teacher model ({teacher_model_name}, BF16)...")
     teacher_model, tokenizer = load_teacher_model(
-        model_id=TEACHER_MODEL_ID,
+        model_id=teacher_model_name,
         cache_dir=MODEL_CACHE_DIR,
-        quantize_nf4=True,
     )
     print(f"  Teacher loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
 
-    # Load student model with LoRA (~5GB)
-    print("Loading student model (BF16 + LoRA)...")
+    # Load student model (~1.2GB in BF16)
+    print("Loading student model (BF16, full fine-tune)...")
     student_model, _ = load_student_model(
         model_id=STUDENT_MODEL_ID,
         cache_dir=MODEL_CACHE_DIR,
-        apply_lora=True,
         dtype="bfloat16",
     )
     print(f"  Student loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
+
+    # Peak memory after loading both models
+    if torch.cuda.is_available():
+        peak_mem = torch.cuda.max_memory_allocated() / 1e9
+        print(f"\n  Peak GPU memory after loading both models: {peak_mem:.1f} GB")
 
     # Load training data
     limit_val = limit if limit > 0 else None
@@ -137,15 +142,16 @@ def train(
 @app.local_entrypoint()
 def main(
     num_steps: int = 150,
-    batch_size: int = 8,
+    batch_size: int = 32,
     num_samples_per_prompt: int = 4,
-    lr: float = 1e-5,
-    max_new_tokens: int = 2048,
+    lr: float = 3e-6,
+    max_new_tokens: int = 1024,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
     limit: int = 0,
     skip_sanity_check: bool = False,
     wandb_run_name: str = "",
+    teacher_model_name: str = "",
 ):
     """Local entry point that dispatches to Modal."""
     train.remote(
@@ -159,4 +165,5 @@ def main(
         limit=limit,
         skip_sanity_check=skip_sanity_check,
         wandb_run_name=wandb_run_name if wandb_run_name else None,
+        teacher_model_name=teacher_model_name if teacher_model_name else TEACHER_MODEL_ID,
     )

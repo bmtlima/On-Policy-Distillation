@@ -7,7 +7,7 @@ trajectories via a single forward pass per trajectory.
 from __future__ import annotations
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.modal_app import TEACHER_MODEL_ID
 from src.rollout import RolloutBatch, Trajectory, batch_forward_logprobs
@@ -17,16 +17,13 @@ def load_teacher_model(
     model_id: str = TEACHER_MODEL_ID,
     cache_dir: str | None = None,
     device_map: str = "auto",
-    quantize_nf4: bool = False,
 ):
-    """Load the teacher model for log-prob computation.
+    """Load the teacher model in BF16 (no quantization) for clean log-probs.
 
     Args:
         model_id: HuggingFace model ID for the teacher.
         cache_dir: Cache directory for model weights.
         device_map: Device placement strategy.
-        quantize_nf4: If True, load with bitsandbytes NF4 4-bit quantization
-            (~18GB for 32B model). Required for co-located training on A100-80GB.
 
     Returns:
         (model, tokenizer) tuple.
@@ -37,24 +34,13 @@ def load_teacher_model(
         trust_remote_code=True,
     )
 
-    load_kwargs = dict(
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
         cache_dir=cache_dir,
         device_map=device_map,
+        torch_dtype=torch.bfloat16,
         trust_remote_code=True,
     )
-
-    if quantize_nf4:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-        )
-        load_kwargs["quantization_config"] = bnb_config
-    else:
-        load_kwargs["torch_dtype"] = torch.float16
-
-    model = AutoModelForCausalLM.from_pretrained(model_id, **load_kwargs)
     model.eval()
 
     return model, tokenizer

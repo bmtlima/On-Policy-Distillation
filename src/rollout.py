@@ -133,7 +133,7 @@ def sample_rollouts_hf(
     prompts: list[str],
     ground_truths: list[str] | None = None,
     problem_indices: list[int] | None = None,
-    max_new_tokens: int = 2048,
+    max_new_tokens: int = 1024,
     temperature: float = 1.0,
     top_p: float = 0.95,
     num_samples_per_prompt: int = 1,

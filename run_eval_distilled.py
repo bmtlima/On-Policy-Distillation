@@ -1,9 +1,10 @@
-"""Evaluate the distilled student model (with LoRA checkpoint) on MATH.
+"""Evaluate the distilled student model on MATH.
 
 Usage:
     modal run run_eval_distilled.py                                  # Final checkpoint
     modal run run_eval_distilled.py --checkpoint-name step_100       # Specific checkpoint
-    modal run run_eval_distilled.py --limit 100                      # Quick test
+    modal run run_eval_distilled.py --limit 100                      # First 100 problems
+    modal run run_eval_distilled.py --sample 200                     # Random 200 (seed 42, matches baseline)
 """
 
 from __future__ import annotations
@@ -42,31 +43,64 @@ def set_seeds(seed: int = SEED) -> None:
     timeout=3600,
     secrets=[modal.Secret.from_name("huggingface-secret")],
 )
+def patch_checkpoint_config(checkpoint_path: str) -> dict:
+    """Fix checkpoint config.json for vLLM compatibility.
+
+    Gradient checkpointing sets use_cache=False during training, which
+    breaks vLLM inference. This patches it back to True.
+    """
+    import json
+    import os
+
+    config_path = os.path.join(checkpoint_path, "config.json")
+    print(f"Checkpoint contents: {os.listdir(checkpoint_path)}")
+
+    # Remove stale LoRA adapter files — vLLM treats all .safetensors as model
+    # weight shards, so adapter_model.safetensors causes key mismatches.
+    for stale in ("adapter_model.safetensors", "adapter_config.json"):
+        stale_path = os.path.join(checkpoint_path, stale)
+        if os.path.exists(stale_path):
+            os.remove(stale_path)
+            print(f"Removed stale LoRA file: {stale}")
+
+    with open(config_path) as f:
+        config = json.load(f)
+
+    print(f"Original use_cache: {config.get('use_cache')}")
+    config["use_cache"] = True
+
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+
+    print("Patched use_cache=True")
+    checkpoint_vol.commit()
+    return {"status": "ok", "files": os.listdir(checkpoint_path)}
+
+
+@app.function(
+    image=vllm_image,
+    gpu=STUDENT_GPU,
+    volumes={MODEL_CACHE_DIR: model_cache, CHECKPOINT_DIR: checkpoint_vol},
+    timeout=3600,
+    secrets=[modal.Secret.from_name("huggingface-secret")],
+)
 def eval_distilled(
     prompts: list[str],
-    model_id: str = STUDENT_MODEL_ID,
-    lora_path: str | None = None,
+    checkpoint_path: str,
     temperature: float = 0.0,
     max_tokens: int = 2048,
 ) -> list[dict]:
-    """Generate completions from distilled student using vLLM with LoRA."""
+    """Generate completions from distilled student using vLLM."""
     from vllm import LLM, SamplingParams
 
-    enable_lora = lora_path is not None
     llm = LLM(
-        model=model_id,
+        model=checkpoint_path,
+        tokenizer=STUDENT_MODEL_ID,
         download_dir=MODEL_CACHE_DIR,
         trust_remote_code=True,
-        max_model_len=4096,
-        enable_lora=enable_lora,
+        max_model_len=8192,
         dtype="float16",
     )
-
-    lora_request = None
-    if lora_path:
-        from vllm.lora.request import LoRARequest
-
-        lora_request = LoRARequest("student-lora", 1, lora_path)
 
     params = SamplingParams(
         temperature=temperature,
@@ -74,12 +108,15 @@ def eval_distilled(
         top_p=0.95 if temperature > 0 else 1.0,
     )
 
-    outputs = llm.generate(prompts, params, lora_request=lora_request)
+    outputs = llm.generate(prompts, params)
 
     results = []
     for output in outputs:
         completion = output.outputs[0]
-        results.append({"text": completion.text})
+        results.append({
+            "text": completion.text,
+            "finish_reason": completion.finish_reason,
+        })
 
     return results
 
@@ -87,6 +124,7 @@ def eval_distilled(
 @app.local_entrypoint()
 def main(
     limit: int = 0,
+    sample: int = 0,
     batch_size: int = 64,
     data_dir: str = "data",
     checkpoint_name: str = "final",
@@ -94,7 +132,8 @@ def main(
     """Evaluate the distilled model and compare to baseline.
 
     Args:
-        limit: Number of problems (0 = all).
+        limit: Number of problems sequentially (0 = all).
+        sample: Randomly sample N problems (seed 42). Overrides limit.
         batch_size: Inference batch size.
         data_dir: Path to data directory.
         checkpoint_name: Name of checkpoint subdirectory (e.g. "final", "step_100").
@@ -110,8 +149,18 @@ def main(
         save_results,
     )
 
-    limit_val = limit if limit > 0 else None
-    df = load_math_dataset(split="test", data_dir=data_dir, limit=limit_val)
+    # Load dataset with same sampling logic as run_baselines.py
+    df = load_math_dataset(split="test", data_dir=data_dir)
+
+    if sample > 0:
+        indices = list(range(len(df)))
+        random.seed(SEED)
+        sampled_indices = sorted(random.sample(indices, min(sample, len(df))))
+        df = df.iloc[sampled_indices].reset_index(drop=True)
+        print(f"Sampled {len(df)} problems (seed={SEED})")
+    elif limit > 0:
+        df = df.head(limit)
+
     problems = df["problem"].tolist()
     ground_truths = df["answer"].tolist()
 
@@ -125,28 +174,38 @@ def main(
     messages_batch = format_problems_batch(problems)
     prompts = apply_chat_template_batch(tokenizer, messages_batch)
 
-    # Path to LoRA checkpoint on the Modal volume
-    lora_path = f"{CHECKPOINT_DIR}/{checkpoint_name}"
+    # Path to full checkpoint on the Modal volume
+    checkpoint_path = f"{CHECKPOINT_DIR}/{checkpoint_name}"
+
+    # Patch checkpoint config for vLLM compatibility
+    print("Patching checkpoint config...")
+    patch_result = patch_checkpoint_config.remote(checkpoint_path=checkpoint_path)
+    print(f"  Checkpoint files: {patch_result['files']}")
 
     # Process in batches
     all_completions = []
+    all_finish_reasons = []
     for i in range(0, len(prompts), batch_size):
         batch = prompts[i : i + batch_size]
         print(f"  Batch {i // batch_size + 1}/{(len(prompts) - 1) // batch_size + 1}")
         results = eval_distilled.remote(
             prompts=batch,
-            lora_path=lora_path,
+            checkpoint_path=checkpoint_path,
             temperature=0.0,
             max_tokens=3072,
         )
         all_completions.extend([r["text"] for r in results])
+        all_finish_reasons.extend([r.get("finish_reason", "unknown") for r in results])
 
     # Track truncation
     from answer_extraction import extract_boxed_answer
 
     n_truncated = sum(1 for c in all_completions if extract_boxed_answer(c) is None)
+    n_length = sum(1 for r in all_finish_reasons if r == "length")
+    n_stop = sum(1 for r in all_finish_reasons if r == "stop")
     truncation_rate = n_truncated / len(all_completions) if all_completions else 0.0
-    print(f"  Truncation rate (no \\boxed{{}}): {truncation_rate:.1%} ({n_truncated}/{len(all_completions)})")
+    print(f"  No \\boxed{{}}: {n_truncated}/{len(all_completions)} ({truncation_rate:.1%})")
+    print(f"  Finish reasons: stop={n_stop}, length={n_length}")
 
     # Evaluate
     eval_results = evaluate_completions(all_completions, ground_truths)
@@ -155,7 +214,7 @@ def main(
     by_type = compute_accuracy_by_group(eval_results, df, "type")
 
     report = format_eval_report(
-        model_name=f"{STUDENT_MODEL_ID} + LoRA ({checkpoint_name})",
+        model_name=f"{STUDENT_MODEL_ID} (distilled, {checkpoint_name})",
         overall_accuracy=overall_acc,
         by_level=by_level,
         by_type=by_type,

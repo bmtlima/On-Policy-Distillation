@@ -24,7 +24,7 @@ base_image = (
     .pip_install(
         "torch>=2.1.0",
         "transformers>=4.45.0",
-        "peft>=0.13.0",
+
         "datasets>=3.0.0",
         "numpy>=1.26.0",
         "pandas>=2.1.0",
@@ -38,12 +38,10 @@ base_image = (
 )
 
 # ---------------------------------------------------------------------------
-# Training image – base + bitsandbytes for NF4 quantization
-# Includes local source and data for remote execution of run_train.py
+# Training image – base deps + local source/data for remote execution
 # ---------------------------------------------------------------------------
 training_image = (
     base_image
-    .pip_install("bitsandbytes>=0.43.0")
     .add_local_python_source("src")
     .add_local_file("answer_extraction.py", remote_path="/root/answer_extraction.py")
     .add_local_dir("data", remote_path="/root/data")
@@ -63,6 +61,8 @@ vllm_image = (
         "tqdm>=4.66.0",
         "pyarrow>=14.0.0",
     )
+    .add_local_python_source("src")
+    .add_local_file("answer_extraction.py", remote_path="/root/answer_extraction.py")
 )
 
 # ---------------------------------------------------------------------------
@@ -70,16 +70,16 @@ vllm_image = (
 # ---------------------------------------------------------------------------
 TEACHER_GPU = "H200"  # 32B model for baseline eval via vLLM
 STUDENT_GPU = "A10G"  # 0.6B model, plenty of room
-TRAINING_GPU = "A100-80GB"  # Co-located teacher+student for OPD
+TRAINING_GPU = "H200"  # Co-located teacher+student for OPD
 
 # ---------------------------------------------------------------------------
 # Model IDs
 # ---------------------------------------------------------------------------
-TEACHER_MODEL_ID = "Qwen/Qwen3-14B"
-TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-14B-AWQ"  # Pre-quantized AWQ for vLLM baselines
+TEACHER_MODEL_ID = "Qwen/Qwen3-8B"
+TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-8B"  # For vLLM baselines
 STUDENT_MODEL_ID = "Qwen/Qwen3-0.6B"
 
 # ---------------------------------------------------------------------------
-# Quantization settings
+# Quantization settings (vLLM baseline inference only)
 # ---------------------------------------------------------------------------
-TEACHER_QUANTIZATION = "awq"  # For vLLM baseline inference
+TEACHER_QUANTIZATION = None  # No quantization needed for 8B

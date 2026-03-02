@@ -96,19 +96,17 @@ def sanity_check():
     print(f"Device: {device}")
 
     # --- Load models ---
-    print("\nLoading teacher model (NF4)...")
+    print("\nLoading teacher model (BF16)...")
     teacher_model, tokenizer = load_teacher_model(
         model_id=TEACHER_MODEL_ID,
         cache_dir=MODEL_CACHE_DIR,
-        quantize_nf4=True,
     )
     print(f"  Teacher loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
 
-    print("Loading student model (BF16 + LoRA)...")
+    print("Loading student model (BF16)...")
     student_model, _ = load_student_model(
         model_id=STUDENT_MODEL_ID,
         cache_dir=MODEL_CACHE_DIR,
-        apply_lora=True,
         dtype="bfloat16",
     )
     print(f"  Student loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
