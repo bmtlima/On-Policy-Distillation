@@ -127,6 +127,7 @@ def main(
     sample: int = 0,
     batch_size: int = 64,
     data_dir: str = "data",
+    run_name: str = "",
     checkpoint_name: str = "final",
 ):
     """Evaluate the distilled model and compare to baseline.
@@ -136,6 +137,7 @@ def main(
         sample: Randomly sample N problems (seed 42). Overrides limit.
         batch_size: Inference batch size.
         data_dir: Path to data directory.
+        run_name: WandB run name (subdirectory under checkpoints). Required.
         checkpoint_name: Name of checkpoint subdirectory (e.g. "final", "step_100").
     """
     set_seeds()
@@ -152,6 +154,7 @@ def main(
     # Load dataset with same sampling logic as run_baselines.py
     df = load_math_dataset(split="test", data_dir=data_dir)
 
+    sampled_indices = None
     if sample > 0:
         indices = list(range(len(df)))
         random.seed(SEED)
@@ -175,7 +178,11 @@ def main(
     prompts = apply_chat_template_batch(tokenizer, messages_batch)
 
     # Path to full checkpoint on the Modal volume
-    checkpoint_path = f"{CHECKPOINT_DIR}/{checkpoint_name}"
+    if run_name:
+        checkpoint_path = f"{CHECKPOINT_DIR}/{run_name}/{checkpoint_name}"
+    else:
+        # Legacy: flat checkpoint dir (pre-namespacing)
+        checkpoint_path = f"{CHECKPOINT_DIR}/{checkpoint_name}"
 
     # Patch checkpoint config for vLLM compatibility
     print("Patching checkpoint config...")
@@ -222,7 +229,35 @@ def main(
     )
     print(report)
 
-    # Save detailed results
-    output_path = f"results_distilled_{checkpoint_name}.json"
+    # Save detailed results with metadata (matches baseline format)
+    import json
+    import os
+
+    run_label = f"{run_name}_" if run_name else ""
+    output_path = f"logs/student/distilled_{run_label}{checkpoint_name}_{len(eval_results)}.json"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_results(eval_results, df, output_path)
+
+    with open(output_path, "r") as f:
+        data = json.load(f)
+
+    n_correct = sum(1 for r in eval_results if r["correct"])
+    n_null = sum(1 for r in eval_results if r["predicted"] is None)
+
+    metadata = {
+        "model_id": STUDENT_MODEL_ID,
+        "checkpoint": checkpoint_name,
+        "n_problems": len(eval_results),
+        "n_correct": n_correct,
+        "n_null_predictions": n_null,
+        "accuracy": overall_acc,
+        "finish_reasons": {"stop": n_stop, "length": n_length},
+    }
+    if sample > 0:
+        metadata["seed"] = SEED
+        metadata["sampled_indices"] = sampled_indices
+
+    wrapped = {"metadata": metadata, "results": data}
+    with open(output_path, "w") as f:
+        json.dump(wrapped, f, indent=2)
     print(f"Detailed results saved to {output_path}")

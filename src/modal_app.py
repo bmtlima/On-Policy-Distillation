@@ -77,7 +77,7 @@ TRAINING_GPU = "H200"  # Co-located teacher+student for OPD
 # ---------------------------------------------------------------------------
 TEACHER_MODEL_ID = "Qwen/Qwen3-8B"
 TEACHER_MODEL_ID_AWQ = "Qwen/Qwen3-8B"  # For vLLM baselines
-STUDENT_MODEL_ID = "Qwen/Qwen3-0.6B"
+STUDENT_MODEL_ID = "Qwen/Qwen3-1.7B"
 
 # ---------------------------------------------------------------------------
 # Quantization settings (vLLM baseline inference only)

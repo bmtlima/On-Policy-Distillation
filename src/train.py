@@ -47,7 +47,7 @@ class TrainConfig:
     num_steps: int = 150
     batch_size: int = 32
     num_samples_per_prompt: int = 4
-    max_new_tokens: int = 1024
+    max_new_tokens: int = 1500
     temperature: float = 0.7
     top_p: float = 0.95 # can change to 1.0 too
     ppo_clip_eps: float = 0.2
@@ -57,6 +57,7 @@ class TrainConfig:
     teacher_batch_size: int = 16  # teacher scoring sub-batch size
     generation_batch_size: int = 64  # batch size for student model.generate()
     train_fwd_batch_size: int = 4  # batch size for training forward pass (with grad)
+    eval_every: int = 25  # run eval every N steps (0 = disabled)
     wandb_project: str = "opd-metis"
     wandb_run_name: str | None = None
     seed: int = SEED
@@ -208,6 +209,101 @@ def get_cosine_schedule_with_warmup(
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
+def evaluate_student(
+    student_model,
+    tokenizer,
+    eval_prompts: list[str],
+    eval_answers: list[str],
+    device: torch.device,
+    max_new_tokens: int = 1500,
+    generation_batch_size: int = 64,
+) -> dict[str, float]:
+    """Run greedy eval on a fixed set of test problems.
+
+    Returns dict with eval/accuracy, eval/answer_rate, eval/mean_length, eval/time_s.
+    """
+    student_model.eval()
+    t_start = time.time()
+
+    pad_token_id = tokenizer.pad_token_id or tokenizer.eos_token_id
+    original_padding_side = tokenizer.padding_side
+    tokenizer.padding_side = "left"
+
+    all_completions: list[str] = []
+    prompt_encodings = [tokenizer.encode(p, return_tensors="pt")[0] for p in eval_prompts]
+
+    for chunk_start in range(0, len(eval_prompts), generation_batch_size):
+        chunk_end = min(chunk_start + generation_batch_size, len(eval_prompts))
+        chunk_encodings = prompt_encodings[chunk_start:chunk_end]
+        chunk_lengths = [len(enc) for enc in chunk_encodings]
+
+        max_prompt_len = max(chunk_lengths)
+        padded_ids = []
+        attn_masks = []
+        for enc, length in zip(chunk_encodings, chunk_lengths):
+            pad_len = max_prompt_len - length
+            padded_ids.append(
+                torch.cat([torch.full((pad_len,), pad_token_id, dtype=enc.dtype), enc])
+            )
+            attn_masks.append(
+                torch.cat([torch.zeros(pad_len, dtype=torch.long), torch.ones(length, dtype=torch.long)])
+            )
+
+        input_ids = torch.stack(padded_ids).to(device)
+        attention_mask = torch.stack(attn_masks).to(device)
+
+        with torch.no_grad():
+            outputs = student_model.generate(
+                input_ids,
+                attention_mask=attention_mask,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                return_dict_in_generate=True,
+            )
+
+        for j in range(len(chunk_encodings)):
+            gen_ids = outputs.sequences[j]
+            prompt_len = chunk_lengths[j]
+            left_pad_len = max_prompt_len - prompt_len
+            comp_ids = gen_ids[left_pad_len + prompt_len:].tolist()
+            while comp_ids and comp_ids[-1] in (pad_token_id, tokenizer.eos_token_id):
+                comp_ids.pop()
+            all_completions.append(tokenizer.decode(comp_ids, skip_special_tokens=True))
+
+    tokenizer.padding_side = original_padding_side
+
+    # Score completions
+    n_correct = 0
+    n_with_answer = 0
+    comp_lengths = []
+    for comp, gt in zip(all_completions, eval_answers):
+        comp_lengths.append(len(comp.split()))
+        pred = extract_boxed_answer(comp)
+        if pred is not None:
+            n_with_answer += 1
+            if answers_match(pred, gt):
+                n_correct += 1
+
+    n_total = len(eval_prompts)
+    t_eval = time.time() - t_start
+
+    metrics = {
+        "eval/accuracy": n_correct / n_total if n_total else 0.0,
+        "eval/answer_rate": n_with_answer / n_total if n_total else 0.0,
+        "eval/mean_length_words": np.mean(comp_lengths) if comp_lengths else 0.0,
+        "eval/time_s": t_eval,
+    }
+
+    print(
+        f"  EVAL: accuracy={metrics['eval/accuracy']:.1%} "
+        f"answer_rate={metrics['eval/answer_rate']:.1%} "
+        f"({n_correct}/{n_total} correct) "
+        f"[{t_eval:.0f}s]"
+    )
+
+    return metrics
+
+
 def train_opd(
     config: TrainConfig,
     train_df: pd.DataFrame,
@@ -216,6 +312,7 @@ def train_opd(
     tokenizer,
     device: torch.device,
     checkpoint_dir: str = "/root/checkpoints",
+    eval_df: pd.DataFrame | None = None,
 ):
     """Run the full on-policy distillation training loop.
 
@@ -227,6 +324,7 @@ def train_opd(
         tokenizer: Shared tokenizer (both models are Qwen3).
         device: Torch device.
         checkpoint_dir: Where to save LoRA checkpoints.
+        eval_df: Optional MATH test set subset for periodic evaluation.
     """
     import wandb
 
@@ -234,6 +332,8 @@ def train_opd(
     wandb.init(
         project=config.wandb_project,
         name=config.wandb_run_name,
+        id=wandb.util.generate_id(),
+        resume="never",
         config={
             "lr": config.lr,
             "num_steps": config.num_steps,
@@ -246,6 +346,10 @@ def train_opd(
             "warmup_steps": config.warmup_steps,
         },
     )
+
+    # Namespace checkpoint dir by run name so runs don't overwrite each other
+    run_name = config.wandb_run_name or wandb.run.name
+    checkpoint_dir = os.path.join(checkpoint_dir, run_name)
 
     # JSON-lines log file — persists to checkpoint volume
     log_path = os.path.join(checkpoint_dir, "train_log.jsonl")
@@ -274,10 +378,37 @@ def train_opd(
         msgs = format_problem(p)
         all_prompts.append(apply_chat_template(tokenizer, msgs))
 
+    # Pre-format eval prompts if eval set provided
+    eval_prompts = None
+    eval_answers = None
+    if eval_df is not None and config.eval_every > 0:
+        eval_answers = eval_df["answer"].tolist()
+        eval_prompts = []
+        for p in eval_df["problem"].tolist():
+            msgs = format_problem(p)
+            eval_prompts.append(apply_chat_template(tokenizer, msgs))
+        print(f"Eval set: {len(eval_prompts)} problems, every {config.eval_every} steps")
+
     print(f"Starting OPD training for {config.num_steps} steps")
     print(f"  Batch size: {config.batch_size} prompts x {config.num_samples_per_prompt} samples = {config.batch_size * config.num_samples_per_prompt} trajectories/step")
     print(f"  LR: {config.lr}, PPO clip: {config.ppo_clip_eps}")
     print(f"  Total train problems: {len(problems)}")
+
+    # Step-0 eval: baseline before any training
+    if eval_prompts is not None and config.eval_every > 0:
+        print("\nRunning baseline eval (step 0, before training)...")
+        eval_metrics = evaluate_student(
+            student_model=student_model,
+            tokenizer=tokenizer,
+            eval_prompts=eval_prompts,
+            eval_answers=eval_answers,
+            device=device,
+            max_new_tokens=config.max_new_tokens,
+            generation_batch_size=config.generation_batch_size,
+        )
+        wandb.log(eval_metrics, step=0)
+        log_file.write(json.dumps({"event": "eval", "step": 0, **eval_metrics}) + "\n")
+        log_file.flush()
 
     for step in range(config.num_steps):
         step_start = time.time()
@@ -466,8 +597,8 @@ def train_opd(
                 # Fix 3: Per-sequence loss normalization — equal weight per trajectory
                 chunk_loss = chunk_loss + (loss_dict["loss"] / ml) / len(valid_trajectories)
 
-                # Track metrics (detached)
-                total_loss += loss_dict["loss"].item()
+                # Track metrics (detached) — log the same normalized loss used for backprop
+                total_loss += (loss_dict["loss"].item() / ml) / len(valid_trajectories)
                 total_kl += (old_lps - teach_lps).mean().item()
                 total_ratio += loss_dict["mean_ratio"].item()
                 total_max_ratio = max(total_max_ratio, loss_dict["max_ratio"].item())
@@ -491,7 +622,7 @@ def train_opd(
             mem_after_train = torch.cuda.max_memory_allocated() / 1e9
 
             # Log metrics
-            avg_loss = total_loss / valid_trajs
+            avg_loss = total_loss  # already normalized per-token and per-trajectory during accumulation
             current_lr = scheduler.get_last_lr()[0]
             step_time = time.time() - step_start
             avg_adv = total_adv / valid_trajs
@@ -557,6 +688,25 @@ def train_opd(
             os.makedirs(ckpt_path, exist_ok=True)
             save_checkpoint(student_model, tokenizer, ckpt_path)
             print(f"  Checkpoint saved to {ckpt_path}")
+
+        # Periodic evaluation
+        if (
+            eval_prompts is not None
+            and config.eval_every > 0
+            and (step + 1) % config.eval_every == 0
+        ):
+            eval_metrics = evaluate_student(
+                student_model=student_model,
+                tokenizer=tokenizer,
+                eval_prompts=eval_prompts,
+                eval_answers=eval_answers,
+                device=device,
+                max_new_tokens=config.max_new_tokens,
+                generation_batch_size=config.generation_batch_size,
+            )
+            wandb.log(eval_metrics, step=step)
+            log_file.write(json.dumps({"event": "eval", "step": step, **eval_metrics}) + "\n")
+            log_file.flush()
 
     # Save final checkpoint
     final_path = os.path.join(checkpoint_dir, "final")

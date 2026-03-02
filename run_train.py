@@ -41,7 +41,7 @@ def train(
     batch_size: int = 32,
     num_samples_per_prompt: int = 4,
     lr: float = 3e-6,
-    max_new_tokens: int = 1024,
+    max_new_tokens: int = 1500,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
     limit: int = 0,
@@ -95,6 +95,13 @@ def train(
     train_df = load_math_dataset(split="train", data_dir="data", limit=limit_val)
     print(f"\nLoaded {len(train_df)} training problems")
 
+    # Load eval set (stratified 200 problems from test split, seeded for reproducibility)
+    full_test_df = load_math_dataset(split="test", data_dir="data")
+    eval_df = full_test_df.sample(n=200, random_state=42)
+    print(f"Loaded {len(eval_df)} eval problems (test split, stratified sample)")
+    print(f"  Types: {eval_df['type'].value_counts().to_dict()}")
+    print(f"  Levels: {eval_df['level'].value_counts().sort_index().to_dict()}")
+
     # Teacher sanity check
     if not skip_sanity_check:
         problems = train_df["problem"].tolist()
@@ -132,6 +139,7 @@ def train(
         tokenizer=tokenizer,
         device=device,
         checkpoint_dir=CHECKPOINT_DIR,
+        eval_df=eval_df,
     )
 
     # Commit volume to persist checkpoints
@@ -145,7 +153,7 @@ def main(
     batch_size: int = 32,
     num_samples_per_prompt: int = 4,
     lr: float = 3e-6,
-    max_new_tokens: int = 1024,
+    max_new_tokens: int = 1500,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
     limit: int = 0,

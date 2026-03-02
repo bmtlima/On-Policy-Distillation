@@ -38,6 +38,7 @@ def main(
     model: str = "both",
     batch_size: int = 64,
     data_dir: str = "data",
+    output_name: str = "",
 ):
     """Run baseline evaluations.
 
@@ -47,6 +48,7 @@ def main(
         model: Which model to evaluate: "student", "teacher", or "both".
         batch_size: Inference batch size.
         data_dir: Path to data directory.
+        output_name: Custom output filename (without .json). Defaults to baseline_{n}.
     """
     set_seeds()
 
@@ -103,6 +105,7 @@ def main(
             evaluate_completions,
             format_eval_report,
             save_results,
+            output_name=output_name,
         )
 
     if model in ("teacher", "both"):
@@ -122,6 +125,7 @@ def main(
             evaluate_completions,
             format_eval_report,
             save_results,
+            output_name=output_name,
         )
 
 
@@ -140,6 +144,7 @@ def _run_eval(
     evaluate_completions,
     format_eval_report,
     save_results,
+    output_name: str = "",
 ):
     """Run evaluation for a single model."""
     generate_fn = generate_teacher if label == "teacher" else generate_student
@@ -182,7 +187,8 @@ def _run_eval(
     # Save detailed results with metadata
     import json
 
-    output_path = f"logs/{label}/baseline_{n_problems}.json"
+    filename = f"{output_name}.json" if output_name else f"baseline_{n_problems}.json"
+    output_path = f"logs/{label}/{filename}"
     save_results(eval_results, df, output_path)
 
     with open(output_path, "r") as f:
