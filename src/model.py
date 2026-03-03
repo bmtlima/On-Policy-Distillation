@@ -1,13 +1,22 @@
-"""Student model setup for Qwen3-0.6B.
+"""Student model setup for Qwen3-1.7B with LoRA.
 
-Full fine-tuning — all 600M parameters are trainable.
+Uses PEFT LoRA (rank 32) — only ~0.5% of parameters are trainable.
 """
 
 from __future__ import annotations
 
+from peft import LoraConfig, PeftModel, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.modal_app import STUDENT_MODEL_ID
+
+LORA_CONFIG = LoraConfig(
+    r=32,
+    lora_alpha=32,
+    target_modules="all-linear",
+    task_type="CAUSAL_LM",
+    bias="none",
+)
 
 
 def load_student_model(
@@ -16,7 +25,7 @@ def load_student_model(
     device_map: str = "auto",
     dtype: str = "bfloat16",
 ):
-    """Load the student model for full fine-tuning.
+    """Load the student model with LoRA adapters.
 
     Args:
         model_id: HuggingFace model ID.
@@ -25,7 +34,7 @@ def load_student_model(
         dtype: Model dtype — "bfloat16" for training, "float16" for inference.
 
     Returns:
-        (model, tokenizer) tuple.
+        (model, tokenizer) tuple. model is a PeftModel with LoRA.
     """
     import torch
 
@@ -37,7 +46,7 @@ def load_student_model(
         trust_remote_code=True,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(
+    base_model = AutoModelForCausalLM.from_pretrained(
         model_id,
         cache_dir=cache_dir,
         torch_dtype=torch_dtype,
@@ -45,8 +54,11 @@ def load_student_model(
         trust_remote_code=True,
     )
 
+    # Apply LoRA — freezes base model, only adapter weights are trainable
+    model = get_peft_model(base_model, LORA_CONFIG)
+
     # Gradient checkpointing: recompute activations during backward instead of
-    # storing them for all 28 layers.  Cuts activation memory ~5x at ~30% more compute.
+    # storing them for all layers. Cuts activation memory ~5x at ~30% more compute.
     model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
     total = sum(p.numel() for p in model.parameters())
@@ -63,16 +75,16 @@ def load_student_from_checkpoint(
     cache_dir: str | None = None,
     device_map: str = "auto",
 ):
-    """Load student model from a full checkpoint.
+    """Load student model from a LoRA adapter checkpoint.
 
     Args:
-        checkpoint_path: Path to saved model weights.
-        model_id: Base model HuggingFace ID (used for tokenizer).
+        checkpoint_path: Path to saved LoRA adapter directory.
+        model_id: Base model HuggingFace ID.
         cache_dir: Directory for cached model weights.
         device_map: Device placement strategy.
 
     Returns:
-        (model, tokenizer) tuple.
+        (model, tokenizer) tuple. model is a PeftModel with loaded adapters.
     """
     import torch
 
@@ -82,25 +94,37 @@ def load_student_from_checkpoint(
         trust_remote_code=True,
     )
 
-    model = AutoModelForCausalLM.from_pretrained(
-        checkpoint_path,
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        cache_dir=cache_dir,
         torch_dtype=torch.float16,
         device_map=device_map,
         trust_remote_code=True,
     )
 
+    model = PeftModel.from_pretrained(base_model, checkpoint_path)
+
     return model, tokenizer
 
 
 def save_checkpoint(model, tokenizer, path: str) -> None:
-    """Save full model weights and tokenizer.
+    """Save LoRA adapter weights and tokenizer.
 
-    Restores use_cache=True in the saved config so vLLM can load the
-    checkpoint for inference (gradient checkpointing sets it to False).
+    With a PeftModel, save_pretrained() only writes the adapter files
+    (adapter_config.json + adapter_model.safetensors), which are ~20MB at rank 32.
     """
-    # Temporarily restore use_cache for inference-compatible config
-    use_cache_orig = getattr(model.config, "use_cache", True)
-    model.config.use_cache = True
     model.save_pretrained(path)
-    model.config.use_cache = use_cache_orig
+    tokenizer.save_pretrained(path)
+
+
+def save_full_checkpoint(model, tokenizer, path: str) -> None:
+    """Merge LoRA into base model and save full weights for standalone inference.
+
+    Used for the final checkpoint that can be loaded directly by vLLM
+    without PEFT/LoRA support.
+    """
+    merged = model.merge_and_unload()
+    # Ensure use_cache=True for inference compatibility
+    merged.config.use_cache = True
+    merged.save_pretrained(path)
     tokenizer.save_pretrained(path)

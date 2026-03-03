@@ -387,3 +387,92 @@ def compute_student_logprobs_for_trajectory(
             token_logprobs.append(0.0)
 
     return token_logprobs
+
+
+def sample_rollouts_vllm(
+    llm,
+    lora_request,
+    prompts: list[str],
+    ground_truths: list[str],
+    problem_indices: list[int],
+    max_new_tokens: int = 1500,
+    temperature: float = 1.0,
+    top_p: float = 0.95,
+    tokenizer=None,
+) -> RolloutBatch:
+    """Generate rollouts using vLLM with LoRA hot-swapping.
+
+    Unlike sample_rollouts_hf, this extracts π_old logprobs directly from
+    vLLM's generation output (logprobs=1), so no separate HF forward pass
+    is needed.
+
+    Args:
+        llm: vLLM LLM engine instance.
+        lora_request: vLLM LoRARequest for the current adapter.
+        prompts: List of formatted prompt strings.
+        ground_truths: Ground truth answers.
+        problem_indices: Problem indices in the dataset.
+        max_new_tokens: Maximum tokens to generate.
+        temperature: Sampling temperature.
+        top_p: Nucleus sampling threshold.
+        tokenizer: Tokenizer for encoding prompts (to get prompt_token_ids).
+
+    Returns:
+        RolloutBatch with trajectories that have student_logprobs already populated.
+    """
+    from vllm import SamplingParams
+
+    sampling_params = SamplingParams(
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_new_tokens,
+        logprobs=1,  # request per-token logprobs
+    )
+
+    outputs = llm.generate(prompts, sampling_params, lora_request=lora_request)
+
+    trajectories = []
+    for i, output in enumerate(outputs):
+        completion = output.outputs[0]
+        comp_text = completion.text
+        comp_token_ids = list(completion.token_ids)
+
+        # Extract per-token logprobs from vLLM output.
+        # Each logprobs entry is a dict mapping token_id -> Logprob.
+        # We want the logprob of the actually-sampled token.
+        student_lps = []
+        if completion.logprobs:
+            for tok_id, lp_dict in zip(comp_token_ids, completion.logprobs):
+                if lp_dict and tok_id in lp_dict:
+                    student_lps.append(lp_dict[tok_id].logprob)
+                else:
+                    student_lps.append(0.0)
+
+        # Get prompt token IDs
+        prompt_token_ids = list(output.prompt_token_ids)
+
+        # Strip trailing EOS tokens from completion
+        eos_id = None
+        if tokenizer is not None:
+            eos_id = tokenizer.eos_token_id
+        while comp_token_ids and eos_id is not None and comp_token_ids[-1] == eos_id:
+            comp_token_ids.pop()
+            if student_lps:
+                student_lps.pop()
+
+        # Re-decode after stripping EOS
+        if tokenizer is not None:
+            comp_text = tokenizer.decode(comp_token_ids, skip_special_tokens=True)
+
+        traj = Trajectory(
+            prompt=prompts[i],
+            completion=comp_text,
+            prompt_token_ids=prompt_token_ids,
+            completion_token_ids=comp_token_ids,
+            student_logprobs=student_lps,
+            ground_truth=ground_truths[i] if ground_truths else "",
+            problem_idx=problem_indices[i] if problem_indices else i,
+        )
+        trajectories.append(traj)
+
+    return RolloutBatch(trajectories=trajectories)

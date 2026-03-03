@@ -24,7 +24,7 @@ base_image = (
     .pip_install(
         "torch>=2.1.0",
         "transformers>=4.45.0",
-
+        "peft>=0.13.0",
         "datasets>=3.0.0",
         "numpy>=1.26.0",
         "pandas>=2.1.0",
@@ -42,6 +42,7 @@ base_image = (
 # ---------------------------------------------------------------------------
 training_image = (
     base_image
+    .pip_install("vllm>=0.8.5")
     .add_local_python_source("src")
     .add_local_file("answer_extraction.py", remote_path="/root/answer_extraction.py")
     .add_local_dir("data", remote_path="/root/data")
@@ -70,7 +71,7 @@ vllm_image = (
 # ---------------------------------------------------------------------------
 TEACHER_GPU = "H200"  # 32B model for baseline eval via vLLM
 STUDENT_GPU = "A10G"  # 0.6B model, plenty of room
-TRAINING_GPU = "H200"  # Co-located teacher+student for OPD
+TRAINING_GPU = "H200:2"  # GPU 0: vLLM rollouts, GPU 1: HF teacher+student training
 
 # ---------------------------------------------------------------------------
 # Model IDs

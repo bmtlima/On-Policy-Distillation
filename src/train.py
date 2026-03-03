@@ -22,9 +22,10 @@ import torch
 import torch.nn.functional as F
 
 from answer_extraction import answers_match, extract_boxed_answer
-from src.model import load_student_model, save_checkpoint
+from src.model import load_student_model, save_checkpoint, save_full_checkpoint
+from src.modal_app import MODEL_CACHE_DIR, STUDENT_MODEL_ID
 from src.prompts import apply_chat_template, format_problem
-from src.rollout import Trajectory, batch_forward_logprobs, sample_rollouts_hf
+from src.rollout import Trajectory, batch_forward_logprobs, sample_rollouts_hf, sample_rollouts_vllm
 from src.teacher import compute_teacher_logprobs_local, load_teacher_model
 
 SEED = 42
@@ -43,12 +44,12 @@ def set_seeds(seed: int = SEED) -> None:
 class TrainConfig:
     """Training hyperparameters."""
 
-    lr: float = 3e-6
+    lr: float = 1e-5
     num_steps: int = 150
-    batch_size: int = 32
-    num_samples_per_prompt: int = 4
+    batch_size: int = 128
+    num_samples_per_prompt: int = 1
     max_new_tokens: int = 1500
-    temperature: float = 0.7
+    temperature: float = 1.0
     top_p: float = 0.95 # can change to 1.0 too
     ppo_clip_eps: float = 0.2
     max_grad_norm: float = 1.0
@@ -192,7 +193,7 @@ def get_cosine_schedule_with_warmup(
     optimizer,
     num_warmup_steps: int,
     num_training_steps: int,
-    min_lr_ratio: float = 0.1,
+    min_lr_ratio: float = 0.5,
 ):
     """Cosine learning rate schedule with linear warmup."""
 
@@ -394,6 +395,36 @@ def train_opd(
     print(f"  LR: {config.lr}, PPO clip: {config.ppo_clip_eps}")
     print(f"  Total train problems: {len(problems)}")
 
+    # --- vLLM initialization on GPU 0 (dedicated for rollouts) ---
+    from vllm import LLM, SamplingParams
+    from vllm.lora.request import LoRARequest
+
+    ADAPTER_PATH = "/dev/shm/lora_adapter"
+
+    # Save initial LoRA adapter (B is zero-initialized → base model behavior)
+    print("Saving initial LoRA adapter for vLLM...")
+    student_model.save_pretrained(ADAPTER_PATH)
+    tokenizer.save_pretrained(ADAPTER_PATH)
+
+    # Initialize vLLM on GPU 0 — HF models are on GPU 1, so no conflict.
+    # vLLM with tp=1 defaults to cuda:0.
+    print("Initializing vLLM engine on cuda:0 with LoRA support...")
+    vllm_engine = LLM(
+        model=STUDENT_MODEL_ID,
+        download_dir=MODEL_CACHE_DIR,
+        enable_lora=True,
+        max_lora_rank=32,
+        max_loras=1,
+        max_model_len=2048,
+        gpu_memory_utilization=0.9,
+        dtype="bfloat16",
+        trust_remote_code=True,
+        tensor_parallel_size=1,
+    )
+    print("vLLM engine initialized on GPU 0.")
+
+    adapter_version = 1  # increments each step to force vLLM LoRA reload (must be > 0)
+
     # Step-0 eval: baseline before any training
     if eval_prompts is not None and config.eval_every > 0:
         print("\nRunning baseline eval (step 0, before training)...")
@@ -418,27 +449,28 @@ def train_opd(
         batch_prompts = [all_prompts[i] for i in indices]
         batch_gts = [ground_truths[i] for i in indices]
 
-        # (b) Generate student rollouts (no grad)
-        torch.cuda.reset_peak_memory_stats()
+        # (b) Generate student rollouts via vLLM on GPU 0
+        torch.cuda.reset_peak_memory_stats(device)
         t_rollout_start = time.time()
-        student_model.eval()
-        rollout_batch = sample_rollouts_hf(
-            model=student_model,
-            tokenizer=tokenizer,
+
+        lora_req = LoRARequest("student", adapter_version, ADAPTER_PATH)
+        rollout_batch = sample_rollouts_vllm(
+            llm=vllm_engine,
+            lora_request=lora_req,
             prompts=batch_prompts,
             ground_truths=batch_gts,
             problem_indices=indices,
             max_new_tokens=config.max_new_tokens,
             temperature=config.temperature,
             top_p=config.top_p,
-            num_samples_per_prompt=config.num_samples_per_prompt,
-            generation_batch_size=config.generation_batch_size,
+            tokenizer=tokenizer,
         )
-        t_rollout = time.time() - t_rollout_start
-        mem_after_rollout = torch.cuda.max_memory_allocated() / 1e9
 
-        # (c) Score trajectories with teacher (no grad)
-        torch.cuda.reset_peak_memory_stats()
+        t_rollout = time.time() - t_rollout_start
+        mem_after_rollout = torch.cuda.max_memory_allocated(device) / 1e9
+
+        # (c) Score trajectories with teacher (no grad) on GPU 1
+        torch.cuda.reset_peak_memory_stats(device)
         t_teacher_start = time.time()
         compute_teacher_logprobs_local(
             model=teacher_model,
@@ -447,7 +479,7 @@ def train_opd(
             batch_size=config.teacher_batch_size,
         )
         t_teacher = time.time() - t_teacher_start
-        mem_after_teacher = torch.cuda.max_memory_allocated() / 1e9
+        mem_after_teacher = torch.cuda.max_memory_allocated(device) / 1e9
 
         # Per-rollout metrics (computed on ALL trajectories before filtering)
         all_comp_lens = [len(t.completion_token_ids) for t in rollout_batch.trajectories]
@@ -467,8 +499,8 @@ def train_opd(
         correct_rate = n_correct / n_total_trajs
         truncation_rate = 1.0 - answer_rate
 
-        # (d-g) Training step with gradient
-        torch.cuda.reset_peak_memory_stats()
+        # (d-g) Training step with gradient on GPU 1
+        torch.cuda.reset_peak_memory_stats(device)
         t_train_start = time.time()
         student_model.train()
         optimizer.zero_grad()
@@ -619,7 +651,7 @@ def train_opd(
             optimizer.step()
             scheduler.step()
             t_train = time.time() - t_train_start
-            mem_after_train = torch.cuda.max_memory_allocated() / 1e9
+            mem_after_train = torch.cuda.max_memory_allocated(device) / 1e9
 
             # Log metrics
             avg_loss = total_loss  # already normalized per-token and per-trajectory during accumulation
@@ -708,11 +740,34 @@ def train_opd(
             log_file.write(json.dumps({"event": "eval", "step": step, **eval_metrics}) + "\n")
             log_file.flush()
 
-    # Save final checkpoint
-    final_path = os.path.join(checkpoint_dir, "final")
-    os.makedirs(final_path, exist_ok=True)
-    save_checkpoint(student_model, tokenizer, final_path)
-    print(f"Final checkpoint saved to {final_path}")
+        # Save updated LoRA adapter for next step's vLLM generation.
+        # Incrementing adapter_version forces vLLM to re-read from disk.
+        adapter_version += 1
+        student_model.save_pretrained(ADAPTER_PATH)
+
+    # Save final LoRA adapter
+    final_adapter_path = os.path.join(checkpoint_dir, "final")
+    os.makedirs(final_adapter_path, exist_ok=True)
+    save_checkpoint(student_model, tokenizer, final_adapter_path)
+    print(f"Final LoRA adapter saved to {final_adapter_path}")
+
+    # Save merged full checkpoint for standalone vLLM inference
+    final_merged_path = os.path.join(checkpoint_dir, "final_merged")
+    os.makedirs(final_merged_path, exist_ok=True)
+    save_full_checkpoint(student_model, tokenizer, final_merged_path)
+    print(f"Final merged checkpoint saved to {final_merged_path}")
+
+    # Print final training summary
+    print("\n" + "=" * 60)
+    print("TRAINING SUMMARY")
+    print("=" * 60)
+    print(f"  Steps completed: {config.num_steps}")
+    print(f"  Run name: {run_name}")
+    print(f"  LoRA adapter: {final_adapter_path}")
+    print(f"  Merged checkpoint: {final_merged_path}")
+    print(f"\nTo evaluate, run:")
+    print(f'  modal run run_eval_distilled.py --run-name "{run_name}" --sample 200')
+    print("=" * 60)
 
     log_file.write(json.dumps({"event": "done", "num_steps": config.num_steps}) + "\n")
     log_file.close()

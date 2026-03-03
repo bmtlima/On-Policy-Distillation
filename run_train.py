@@ -38,21 +38,22 @@ from src.modal_app import (
 )
 def train(
     num_steps: int = 150,
-    batch_size: int = 32,
-    num_samples_per_prompt: int = 4,
-    lr: float = 3e-6,
+    batch_size: int = 128,
+    num_samples_per_prompt: int = 1,
+    lr: float = 1e-5,
     max_new_tokens: int = 1500,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
+    eval_every: int = 25,
     limit: int = 0,
     skip_sanity_check: bool = False,
     wandb_run_name: str | None = None,
     teacher_model_name: str = TEACHER_MODEL_ID,
 ):
-    """Run OPD training on a single H200.
+    """Run OPD training on 2x H200.
 
-    Loads both teacher (BF16) and student (BF16) on the same GPU,
-    then runs the on-policy distillation loop.
+    GPU 0: vLLM for fast rollout generation.
+    GPU 1: HF teacher (scoring) + student (LoRA training).
     """
     import torch
 
@@ -62,33 +63,34 @@ def train(
     from src.train import TrainConfig, set_seeds, teacher_sanity_check, train_opd
 
     set_seeds()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name()}")
-        print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+    train_device = torch.device("cuda:1")
+    print(f"Training device: {train_device}")
+    n_gpus = torch.cuda.device_count()
+    for i in range(n_gpus):
+        print(f"  GPU {i}: {torch.cuda.get_device_name(i)} — {torch.cuda.get_device_properties(i).total_memory / 1e9:.1f} GB")
 
-    # Load teacher model in BF16 (no quantization — clean logprobs)
-    print(f"\nLoading teacher model ({teacher_model_name}, BF16)...")
+    # Load teacher model on cuda:1 (BF16, no quantization — clean logprobs)
+    print(f"\nLoading teacher model ({teacher_model_name}, BF16) on cuda:1...")
     teacher_model, tokenizer = load_teacher_model(
         model_id=teacher_model_name,
         cache_dir=MODEL_CACHE_DIR,
+        device_map="cuda:1",
     )
-    print(f"  Teacher loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
+    print(f"  Teacher loaded. GPU 1 mem: {torch.cuda.memory_allocated(1) / 1e9:.1f} GB")
 
-    # Load student model (~1.2GB in BF16)
-    print("Loading student model (BF16, full fine-tune)...")
+    # Load student model on cuda:1 with LoRA (~3.6GB base + ~20MB adapter in BF16)
+    print("Loading student model (BF16, LoRA) on cuda:1...")
     student_model, _ = load_student_model(
         model_id=STUDENT_MODEL_ID,
         cache_dir=MODEL_CACHE_DIR,
+        device_map="cuda:1",
         dtype="bfloat16",
     )
-    print(f"  Student loaded. GPU mem: {torch.cuda.memory_allocated() / 1e9:.1f} GB")
+    print(f"  Student loaded. GPU 1 mem: {torch.cuda.memory_allocated(1) / 1e9:.1f} GB")
 
     # Peak memory after loading both models
-    if torch.cuda.is_available():
-        peak_mem = torch.cuda.max_memory_allocated() / 1e9
-        print(f"\n  Peak GPU memory after loading both models: {peak_mem:.1f} GB")
+    peak_mem = torch.cuda.max_memory_allocated(1) / 1e9
+    print(f"\n  Peak GPU 1 memory after loading both models: {peak_mem:.1f} GB")
 
     # Load training data
     limit_val = limit if limit > 0 else None
@@ -112,7 +114,7 @@ def train(
             tokenizer=tokenizer,
             problems=problems,
             ground_truths=gts,
-            device=device,
+            device=train_device,
             num_problems=20,
         )
         if not ok:
@@ -127,6 +129,7 @@ def train(
         max_new_tokens=max_new_tokens,
         warmup_steps=warmup_steps,
         checkpoint_every=checkpoint_every,
+        eval_every=eval_every,
         wandb_run_name=wandb_run_name,
     )
 
@@ -137,7 +140,7 @@ def train(
         teacher_model=teacher_model,
         student_model=student_model,
         tokenizer=tokenizer,
-        device=device,
+        device=train_device,
         checkpoint_dir=CHECKPOINT_DIR,
         eval_df=eval_df,
     )
@@ -150,12 +153,13 @@ def train(
 @app.local_entrypoint()
 def main(
     num_steps: int = 150,
-    batch_size: int = 32,
-    num_samples_per_prompt: int = 4,
-    lr: float = 3e-6,
+    batch_size: int = 128,
+    num_samples_per_prompt: int = 1,
+    lr: float = 1e-5,
     max_new_tokens: int = 1500,
     warmup_steps: int = 10,
     checkpoint_every: int = 25,
+    eval_every: int = 25,
     limit: int = 0,
     skip_sanity_check: bool = False,
     wandb_run_name: str = "",
@@ -170,6 +174,7 @@ def main(
         max_new_tokens=max_new_tokens,
         warmup_steps=warmup_steps,
         checkpoint_every=checkpoint_every,
+        eval_every=eval_every,
         limit=limit,
         skip_sanity_check=skip_sanity_check,
         wandb_run_name=wandb_run_name if wandb_run_name else None,

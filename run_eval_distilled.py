@@ -128,7 +128,7 @@ def main(
     batch_size: int = 64,
     data_dir: str = "data",
     run_name: str = "",
-    checkpoint_name: str = "final",
+    checkpoint_name: str = "final_merged",
 ):
     """Evaluate the distilled model and compare to baseline.
 
@@ -138,7 +138,7 @@ def main(
         batch_size: Inference batch size.
         data_dir: Path to data directory.
         run_name: WandB run name (subdirectory under checkpoints). Required.
-        checkpoint_name: Name of checkpoint subdirectory (e.g. "final", "step_100").
+        checkpoint_name: Name of checkpoint subdirectory (e.g. "final_merged", "step_100").
     """
     set_seeds()
 
