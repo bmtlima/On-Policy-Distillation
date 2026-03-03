@@ -7,3 +7,6 @@ __pycache__/
 results_*.json
 logs/
 wandb/
+CLAUDE.md
+docs/
+slides/
