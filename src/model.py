@@ -5,7 +5,7 @@ Uses PEFT LoRA (rank 32) — only ~0.5% of parameters are trainable.
 
 from __future__ import annotations
 
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.modal_app import STUDENT_MODEL_ID
@@ -65,44 +65,6 @@ def load_student_model(
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model params: {total:,} total, {trainable:,} trainable ({trainable/total:.1%})")
     print("Gradient checkpointing: enabled")
-
-    return model, tokenizer
-
-
-def load_student_from_checkpoint(
-    checkpoint_path: str,
-    model_id: str = STUDENT_MODEL_ID,
-    cache_dir: str | None = None,
-    device_map: str = "auto",
-):
-    """Load student model from a LoRA adapter checkpoint.
-
-    Args:
-        checkpoint_path: Path to saved LoRA adapter directory.
-        model_id: Base model HuggingFace ID.
-        cache_dir: Directory for cached model weights.
-        device_map: Device placement strategy.
-
-    Returns:
-        (model, tokenizer) tuple. model is a PeftModel with loaded adapters.
-    """
-    import torch
-
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_id,
-        cache_dir=cache_dir,
-        trust_remote_code=True,
-    )
-
-    base_model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        cache_dir=cache_dir,
-        torch_dtype=torch.float16,
-        device_map=device_map,
-        trust_remote_code=True,
-    )
-
-    model = PeftModel.from_pretrained(base_model, checkpoint_path)
 
     return model, tokenizer
 

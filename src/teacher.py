@@ -10,7 +10,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from src.modal_app import TEACHER_MODEL_ID
-from src.rollout import RolloutBatch, Trajectory, batch_forward_logprobs
+from src.rollout import Trajectory, batch_forward_logprobs
 
 
 def load_teacher_model(
@@ -104,24 +104,3 @@ def _score_trajectory_batch(
 
     for traj, lps in zip(non_empty, lp_tensors):
         traj.teacher_logprobs = lps.tolist()
-
-
-def compute_teacher_logprobs_vllm(
-    prompts: list[str],
-    completions: list[str],
-) -> list[list[float]]:
-    """Compute teacher log-probs using vLLM on Modal (remote).
-
-    This is the preferred method for production — uses the vLLM
-    prompt_logprobs API for efficient batched scoring.
-
-    Args:
-        prompts: Formatted prompt strings.
-        completions: Student-generated completion strings.
-
-    Returns:
-        List of per-token teacher log-prob lists.
-    """
-    from src.inference import compute_teacher_logprobs
-
-    return compute_teacher_logprobs.remote(prompts, completions)
