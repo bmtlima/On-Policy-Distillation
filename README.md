@@ -1,6 +1,6 @@
 # OPD-Metis
 
-On-Policy Distillation (OPD) to improve **Qwen3-1.7B**'s math reasoning using **Qwen3-8B** as a teacher, evaluated on the [MATH benchmark](https://arxiv.org/abs/2103.03874).
+Implementation of [On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/) (OPD) to improve **Qwen3-1.7B**'s math reasoning using **Qwen3-8B** as a teacher, evaluated on the [MATH benchmark](https://arxiv.org/abs/2103.03874).
 
 ## How it works
 
