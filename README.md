@@ -2,6 +2,8 @@
 
 Implementation of [On-Policy Distillation](https://thinkingmachines.ai/blog/on-policy-distillation/) (OPD) to improve **Qwen3-1.7B**'s math reasoning using **Qwen3-8B** as a teacher, evaluated on the [MATH benchmark](https://arxiv.org/abs/2103.03874).
 
+Google Doc with experiment results: [LINK](https://docs.google.com/document/d/1aIxPdDHEcvSgeJKm4KkAhHoN9l5_y4z8Hhaj5CzgtdE/edit?usp=sharing)
+
 ## How it works
 
 Each training step:

@@ -10,3 +10,9 @@ wandb/
 CLAUDE.md
 docs/
 slides/
+# Claude Source Control (auto-generated)
+.claude/file-attribution.jsonl
+.claude/session-names.json
+.claude/staged-files.json
+.claude/session-pids.json
+.claude/hooks/log-attribution.sh
